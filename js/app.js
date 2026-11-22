@@ -132,59 +132,157 @@ function consentView(){
   );
 }
 
-/* ---------- student: home ---------- */
-function homeView(offline){
-  const me=S.me;
-  const out=h('button',{class:'linkbtn',onclick:()=>{LS.del('esmet_code');LS.del('esmet_cache');S.code=null;S.me=null;loginView()}},'Esci');
-  const blocks=me.courses.map(c=>courseBlock(c));
-  mount(
-    header(out),
-    h('h1',null,'Ciao '+me.name+'!'),
-    offline?h('p',{class:'sub'},'Sei offline: vedi l’ultima versione scaricata.'):null,
-    blocks.length?blocks:h('p',{class:'sub'},'Non hai ancora corsi assegnati.'),
-    footer()
-  );
+/* ---------- student: shell ---------- */
+const ICO={
+  menu:'M4 7h16M4 12h16M4 17h16',
+  chev:'M9 6l6 6-6 6',
+  back:'M15 6l-6 6 6 6',
+  book:'M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3V4zM5 17a3 3 0 013-3h11',
+  reg:'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM3 20c0-3.3 2.7-6 6-6M14 17l2.2 2.2L21 14.5',
+  cal:'M5 5h14v15H5zM5 10h14M9 3v4M15 3v4M10 13.5l4 4M14 13.5l-4 4',
+  video:'M4 7h11v10H4zM15 11l5-3v8l-5-3',
+  user:'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c0-4 3.6-7 8-7s8 3 8 7',
+  out:'M10 4H5v16h5M15 8l4 4-4 4M19 12H9',
+  flag:'M6 21V4M6 5h11l-2 4 2 4H6'
+};
+function ico(n,size){
+  const ns='http://www.w3.org/2000/svg';
+  const sv=document.createElementNS(ns,'svg');
+  sv.setAttribute('viewBox','0 0 24 24');sv.setAttribute('width',size||22);sv.setAttribute('height',size||22);
+  sv.setAttribute('fill','none');sv.setAttribute('stroke','currentColor');sv.setAttribute('stroke-width','1.9');
+  sv.setAttribute('stroke-linecap','round');sv.setAttribute('stroke-linejoin','round');sv.setAttribute('aria-hidden','true');
+  const p=document.createElementNS(ns,'path');p.setAttribute('d',ICO[n]);sv.append(p);return sv;
 }
-function courseBlock(c){
+function curCourse(){
+  const cs=(S.me&&S.me.courses)||[];
+  return cs.find(c=>c.id===S.cid)||cs[0]||null;
+}
+function drawer(){
+  const me=S.me;
+  const close=()=>ov.remove();
+  const item=(icon,label,fn)=>h('button',{class:'dr-item',onclick:()=>{close();fn()}},ico(icon),label);
+  const panel=h('div',{class:'dr-panel',role:'dialog','aria-label':'Menu'},
+    h('p',{class:'dr-title'},'Esmet Academy'),
+    item('user','Profilo (presto)',()=>{}),
+    (me.courses.length>1)?item('book','Cambia corso',()=>courseSwitch()):null,
+    item('out','Esci',()=>{LS.del('esmet_code');LS.del('esmet_cache');S.code=null;S.me=null;loginView()}),
+    h('p',{class:'dr-ver'},'Ver '+CFG.version));
+  const ov=h('div',{class:'dr-ov',onclick:e=>{if(e.target===ov)close()}},panel);
+  document.body.append(ov);
+}
+function courseSwitch(){
+  const rows=S.me.courses.map(c=>h('button',{class:'row-item',onclick:()=>{S.cid=c.id;homeView()}},h('span',{class:'ri-l'},ico('book'),c.name),ico('chev')));
+  mount(topbar('Cambia corso',()=>homeView()),h('div',{class:'rows'},rows),footer());
+}
+function topbar(title,back){
+  return h('div',{class:'bar'},
+    h('button',{class:'icon-btn','aria-label':'Indietro',onclick:back},ico('back')),
+    h('h2',null,title));
+}
+function tabs(active){
+  const t=(id,label,icon,fn)=>h('button',{class:'tab'+(active===id?' on':''),onclick:fn,'aria-current':active===id?'page':null},ico(icon),h('span',null,label));
+  return h('nav',{class:'tabbar'},t('lez','Lezioni','book',()=>homeView()),t('reg','Registro','reg',()=>registroView()));
+}
+function tabHeader(){
+  const c=curCourse();
+  return h('div',{class:'thead'},
+    h('div',{class:'avatar','aria-hidden':'true'},(S.me.name||'?').trim().charAt(0).toUpperCase()),
+    h('div',{class:'tname'},h('strong',null,S.me.name),h('span',{class:'sub small'},c?c.name:'')),
+    h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:drawer},ico('menu')));
+}
+
+/* ---------- student: home (lezioni) ---------- */
+function homeView(offline){
+  const me=S.me;const c=curCourse();
+  if(!c){mount(tabHeader(),h('p',{class:'sub'},'Non hai ancora corsi assegnati.'),footer());return}
   const lessons=(c.lessons||[]).slice().sort((a,b)=>b.number-a.number);
   const joinMsg=h('p',{class:'sub small',role:'status'});
-  const join=h('button',{class:'primary',onclick:async()=>{
+  const join=h('button',{class:'banner',onclick:async()=>{
     joinMsg.textContent='Un attimo…';
     const win=window.open('about:blank','_blank');
     const {data,error}=await sb.rpc('student_join_lesson',{p_code:S.code,p_course:c.id});
     if(error||!data){if(win)win.close();joinMsg.textContent=error?'Non riesco a registrare l’ingresso. Riprova.':'Il link della lezione non è ancora disponibile.';return}
     joinMsg.textContent='Presenza registrata. Buona lezione!';
     if(win)win.location.href=data;else location.href=data;
-  }},'Accedi alla lezione');
-  const abs=h('button',{class:'secondary',onclick:()=>absenceView(c)},'Avviso assenza');
-  return h('section',{class:'card'},
-    h('h2',null,c.name),
-    h('p',{class:'sub'},[c.level,c.section==='morning'?'mattina':c.section==='evening'?'sera':null].filter(Boolean).join(' · ')),
-    h('div',{class:'row'},c.zoom?null:null,join,abs),joinMsg,
-    h('h3',null,'Lezioni'),
-    lessons.length?h('div',{class:'list'},lessons.map(l=>lessonItem(c,l))):h('p',{class:'sub'},'Nessuna lezione pubblicata.')
-  );
+  }},h('span',null,'Accedi alla lezione'),ico('video'));
+  const rows=lessons.map(l=>{
+    const ex=(l.content&&l.content.exercises)||[];
+    const done=Object.keys(LS.get('esmet_res_'+l.id,{})).length;
+    return h('button',{class:'row-item',onclick:()=>lessonView(c,l)},
+      h('span',{class:'ri-l'},h('span',null,h('span',{class:'kind'},'Lezione '+l.number),h('br'),l.title)),
+      h('span',{class:'ri-r'},h('span',{class:'res'},done+'/'+ex.length),ico('chev')));
+  });
+  mount(tabHeader(),
+    offline?h('p',{class:'sub small'},'Sei offline: vedi l’ultima versione scaricata.'):null,
+    join,joinMsg,
+    h('h3',{class:'sect'},'Lezioni'),
+    rows.length?h('div',{class:'rows'},rows):h('p',{class:'sub'},'Nessuna lezione pubblicata.'),
+    tabs('lez'),footer());
 }
-function lessonItem(c,l){
-  const ex=(l.content&&l.content.exercises)||[];
-  const res=LS.get('esmet_res_'+l.id,{});
-  const done=Object.keys(res).length;
-  return h('button',{class:'item',onclick:()=>lessonView(c,l)},
-    h('span',null,h('span',{class:'kind'},'Lezione '+l.number),h('br'),l.title),
-    h('span',{class:'res'},done+'/'+ex.length));
+
+/* ---------- student: registro ---------- */
+const MESI=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+const GIORNI=['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+async function registroView(filter){
+  const now=new Date();
+  const f=filter||{m:now.getMonth(),y:now.getFullYear()};
+  mount(tabHeader(),h('h3',{class:'sect'},'Registro presenze'),h('p',{class:'sub'},'Caricamento…'),tabs('reg'));
+  let list=[];let offline=false;
+  try{const {data,error}=await sb.rpc('student_attendance',{p_code:S.code});if(error)throw error;list=data||[];LS.set('esmet_att',list)}
+  catch(e){list=LS.get('esmet_att',[]);offline=true}
+  const c=curCourse();
+  list=list.filter(r=>!c||r.course_id===c.id);
+  const years=[...new Set(list.map(r=>+r.date.slice(0,4)).concat([now.getFullYear()]))].sort((a,b)=>b-a);
+  const selM=h('select',{class:'txt sel','aria-label':'Mese'},MESI.map((n,i)=>h('option',{value:i,selected:i===f.m},n)));
+  const selY=h('select',{class:'txt sel','aria-label':'Anno'},years.map(y=>h('option',{value:y,selected:y===f.y},y)));
+  const ch=()=>registroView({m:+selM.value,y:+selY.value});
+  selM.addEventListener('change',ch);selY.addEventListener('change',ch);
+  const mm=String(f.m+1).padStart(2,'0');
+  const items=list.filter(r=>r.date.startsWith(f.y+'-'+mm)).sort((a,b)=>a.date<b.date?1:-1);
+  const lab={present:['Presente','g'],absent:['Assente','b'],absent_notified:['Assente avvisato','n']};
+  const blocks=items.map(r=>{
+    const d=new Date(r.date+'T12:00:00');
+    const st=lab[r.status]||['Non registrata','b'];
+    const note=h('p',{class:'sub small',role:'status'});
+    const rep=r.reported?h('span',{class:'sub small'},'Segnalazione inviata'):
+      h('button',{class:'linkbtn small',onclick:async ev=>{
+        const n=prompt('Cosa non torna? (facoltativo)','');if(n===null)return;
+        const {error}=await sb.rpc('student_report_attendance',{p_code:S.code,p_session:r.session_id,p_note:n});
+        if(error)note.textContent='Non sono riuscito a inviare. Riprova.';
+        else{ev.target.replaceWith(h('span',{class:'sub small'},'Segnalazione inviata'))}
+      }},ico('flag',14),' Non è corretto? Segnala');
+    return h('div',null,
+      h('div',{class:'datepill'},GIORNI[d.getDay()]+', '+MESI[d.getMonth()]+' '+d.getDate()),
+      h('div',{class:'card'},
+        h('div',{class:'row'},h('span',{class:'chip'},r.course),h('span',{class:'pill '+st[1]},st[0])),
+        r.joined_at?h('p',{class:'sub small'},'Ingresso alle '+new Date(r.joined_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})):null,
+        r.reason?h('p',{class:'sub small'},'Motivo: '+r.reason):null,
+        rep,note));
+  });
+  mount(tabHeader(),h('h3',{class:'sect'},'Registro presenze'),
+    offline?h('p',{class:'sub small'},'Sei offline: dati dell’ultimo accesso.'):null,
+    h('div',{class:'row'},selM,selY),
+    blocks.length?blocks:h('p',{class:'sub'},'Nessuna presenza in questo mese.'),
+    h('p',{class:'sub small',style:'text-align:center'},'Non puoi venire a una lezione? ',h('button',{class:'linkbtn small',onclick:()=>absenceView()},'Comunica assenza')),
+    tabs('reg'),footer());
 }
-function absenceView(c){
-  const d=h('input',{type:'date',class:'txt',value:new Date().toISOString().slice(0,10)});
+function absenceView(){
+  const c=curCourse();
+  const today=new Date().toISOString().slice(0,10);
+  const motivo=h('select',{class:'txt sel'},['Seleziona un motivo','Malattia','Lavoro','Impegno familiare','Altro'].map((t,i)=>h('option',{value:i?t:''},t)));
+  const d=h('input',{type:'date',class:'txt',value:today,min:today});
+  const nota=h('textarea',{class:'txt',rows:'3',maxlength:'400'});
   const msg=h('p',{role:'status'});
   const send=h('button',{class:'primary',onclick:async()=>{
+    if(!motivo.value){msg.className='err';msg.textContent='Scegli un motivo.';return}
     send.disabled=true;
-    const {error}=await sb.rpc('student_notify_absence',{p_code:S.code,p_course:c.id,p_date:d.value});
-    if(error){msg.className='err';msg.textContent='Non sono riuscito a inviare. Riprova.';send.disabled=false}
-    else{msg.className='ok';msg.textContent='Avviso inviato. Grazie!'}
-  }},'Avvisa che non ci sarò');
-  mount(header(h('button',{class:'linkbtn',onclick:()=>homeView()},'← Indietro')),
-    h('h1',null,'Avviso assenza'),
-    h('div',{class:'card'},h('p',null,c.name),h('label',null,'Giorno della lezione',d),send,msg),footer());
+    const {error}=await sb.rpc('student_notify_absence',{p_code:S.code,p_course:c.id,p_date:d.value,p_reason:motivo.value,p_note:nota.value||null});
+    if(error){msg.className='err';msg.textContent='Non sono riuscito a inviare. Controlla la data e riprova.';send.disabled=false}
+    else{msg.className='ok';msg.textContent='Assenza comunicata. Grazie!'}
+  }},'Salva');
+  mount(topbar('Comunica assenza',()=>registroView()),
+    h('div',{class:'card'},h('p',{class:'sub'},c.name),
+      h('label',null,'Motivo dell’assenza',motivo),h('label',null,'Giorno della lezione',d),h('label',null,'Nota (facoltativa)',nota),send,msg),footer());
 }
 
 /* ---------- student: lesson ---------- */
@@ -192,21 +290,20 @@ function lessonView(c,l){
   const ex=(l.content&&l.content.exercises)||[];
   const res=LS.get('esmet_res_'+l.id,{});
   const names={flash:'Flash cards',match:'Abbina',quiz:'Quiz',unjumble:'Riordina la frase',cloze:'Completa la frase',group:'Dividi in gruppi',cards:'Carte per parlare',type:'Scrivi la risposta'};
-  const list=ex.map((e,i)=>h('button',{class:'item',onclick:()=>exView(c,l,i)},
-    h('span',null,h('span',{class:'kind'},names[e.type]||e.type,e.hw?h('span',{class:'tag'},'compiti'):null),h('br'),e.title),
-    h('span',{class:'res'},res[i]?res[i].score+'/'+res[i].total:'')));
-  mount(header(h('button',{class:'linkbtn',onclick:()=>homeView()},'← Indietro')),
-    h('h1',null,'Lezione '+l.number+': '+l.title),
-    h('div',{class:'list'},list),
-    h('button',{class:'secondary',onclick:()=>reportView(c,l)},'Invia resoconto alla docente'),
+  const rows=ex.map((e,i)=>h('button',{class:'row-item',onclick:()=>exView(c,l,i)},
+    h('span',{class:'ri-l'},h('span',null,h('span',{class:'kind'},names[e.type]||e.type,e.hw?h('span',{class:'tag'},'compiti'):null),h('br'),e.title)),
+    h('span',{class:'ri-r'},h('span',{class:'res'},res[i]?res[i].score+'/'+res[i].total:''),ico('chev'))));
+  mount(topbar('Lezione '+l.number,()=>homeView()),
+    h('p',{class:'sub'},l.title),
+    h('div',{class:'rows'},rows),
+    h('div',{class:'rows'},h('button',{class:'row-item',onclick:()=>reportView(c,l)},h('span',{class:'ri-l'},ico('flag'),'Invia resoconto alla docente'),ico('chev'))),
     footer());
 }
 function exView(c,l,i){
   const ex=l.content.exercises[i];
   const back=()=>lessonView(c,l);
   const box=h('div',{class:'game'});
-  mount(header(h('button',{class:'linkbtn',onclick:back},'← Indietro')),
-    h('h2',null,ex.title),ex.instr?h('p',{class:'sub'},ex.instr):null,box,footer());
+  mount(topbar(ex.title,back),ex.instr?h('p',{class:'sub'},ex.instr):null,box,footer());
   const eng=ENGINES[ex.type];
   if(!eng){box.append(h('p',null,'Questo tipo di esercizio non è ancora disponibile.'));return}
   eng(ex,box,async r=>{
@@ -241,8 +338,7 @@ function reportView(c,l){
   const txt=reportText(c,l);
   const ta=h('textarea',{class:'txt',rows:'12',readonly:true},txt);
   const msg=h('p',{class:'ok',role:'status'});
-  mount(header(h('button',{class:'linkbtn',onclick:()=>lessonView(c,l)},'← Indietro')),
-    h('h1',null,'Resoconto'),ta,
+  mount(topbar('Resoconto',()=>lessonView(c,l)),ta,
     h('div',{class:'row'},
       h('button',{class:'primary',onclick:async()=>{try{await navigator.clipboard.writeText(txt);msg.textContent='Copiato.'}catch(e){ta.select();msg.textContent='Seleziona e copia il testo.'}}},'Copia'),
       h('a',{class:'secondary',style:'text-decoration:none;display:inline-flex;align-items:center',href:'https://wa.me/?text='+encodeURIComponent(txt),target:'_blank',rel:'noopener'},'WhatsApp'),
