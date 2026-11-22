@@ -311,14 +311,18 @@ function exView(c,l,i){
   eng(ex,box,async r=>{
     r.title=ex.title;r.type=ex.type;
     await submitResult(l,i,r);
-    box.replaceChildren(
+    const wr=r.wrong.length?h('div',{class:'why'},h('strong',null,'Da ripassare:'),r.wrong.map(w=>h('p',{class:'small'},
+      (w.q||'')+(w.expected?' → ':'')+(w.expected||''),(w.given?h('span',{class:'sub'},'  (tu: '+w.given+')'):null)))):null;
+    box.replaceChildren(...[
       h('p',{class:'sum'},r.score+' / '+r.total),
-      h('p',{class:'sub'},r.wrong.length?'Da ripassare: '+r.wrong.length+' ':'Perfetto!'),
+      r.wrong.length?null:h('p',{class:'ok'},'Perfetto!'),
+      wr,
       ex.fin?h('p',null,ex.fin):null,
       h('div',{class:'row'},
         h('button',{class:'primary',onclick:()=>exView(c,l,i)},'Rifai'),
         h('button',{class:'secondary',onclick:back},'Torna alla lezione'),
-        (i+1<l.content.exercises.length)?h('button',{class:'secondary',onclick:()=>exView(c,l,i+1)},'Prossimo'):null));
+        (i+1<l.content.exercises.length)?h('button',{class:'secondary',onclick:()=>exView(c,l,i+1)},'Prossimo'):null)
+    ].filter(Boolean));
   });
 }
 
