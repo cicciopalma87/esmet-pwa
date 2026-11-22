@@ -569,49 +569,124 @@ async function teacherHome(){
   const out=h('button',{class:'linkbtn',onclick:async()=>{await sb.auth.signOut();teacherLogin()}},'Esci');
   mount(header(out),h('h1',null,'Area docenti'),h('p',{class:'sub'},'Caricamento…'));
   const [cs,en]=await Promise.all([
-    sb.from('courses').select('id,name,level,kind,zoom_url').eq('active',true).order('name'),
+    sb.from('courses').select('id,school_id,name,level,kind,zoom_url').eq('active',true).order('name'),
     sb.from('enrollments').select('course_id,section,students(id,display_name,code,consent_at)')
   ]);
   if(cs.error||en.error)return mount(header(out),h('p',{class:'err'},'Errore nel caricamento. Il tuo account ha un profilo docente?'),footer());
   const blocks=cs.data.map(c=>{
-    const studs=en.data.filter(e=>e.course_id===c.id&&e.students);
+    const studs=en.data.filter(e=>e.course_id===c.id&&e.students).sort((a,b)=>a.students.display_name.localeCompare(b.students.display_name));
     return h('section',{class:'card'},h('h2',null,c.name),h('p',{class:'sub'},c.level+' · '+studs.length+' studenti'),
-      h('div',{class:'list'},studs.map(e=>h('button',{class:'item',onclick:()=>teacherStudent(e.students,c)},
-        h('span',null,e.students.display_name,e.section?h('span',{class:'tag'},e.section==='morning'?'mattina':e.section==='evening'?'sera':e.section):null),
-        h('span',{class:'res'},e.students.consent_at?'':'consenso mancante')))),
-      h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze'));
+      h('div',{class:'rows'},studs.map(e=>h('button',{class:'row-item',onclick:()=>studentSheet(e.students,c)},
+        h('span',{class:'ri-l'},e.students.display_name,e.section?h('span',{class:'tag'},e.section==='morning'?'mattina':e.section==='evening'?'sera':e.section):null),
+        h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
+      h('div',{class:'row'},
+        h('button',{class:'primary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
+        h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
   });
   mount(header(out),h('h1',null,'Area docenti'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),footer());
 }
-async function teacherStudent(st,c){
-  const back=h('button',{class:'linkbtn',onclick:teacherHome},'← Indietro');
-  mount(header(back),h('h1',null,st.display_name),h('p',{class:'sub'},'Caricamento…'));
-  const {data,error}=await sb.from('exercise_results').select('exercise_idx,score,total,details,created_at,lessons(number,title)').eq('student_id',st.id).order('created_at',{ascending:false}).limit(200);
-  if(error)return mount(header(back),h('p',{class:'err'},'Errore nel caricamento.'),footer());
-  const rows=data.map(r=>{
-    const pct=r.total?Math.round(100*r.score/r.total):0;
-    const w=(r.details&&r.details.wrong)||[];
-    return h('tr',null,
-      h('td',null,fmtDate(r.created_at)),
-      h('td',null,'L'+(r.lessons?r.lessons.number:'?')+' · '+((r.details&&r.details.title)||('Es. '+(r.exercise_idx+1)))),
-      h('td',null,h('span',{class:'pill '+(pct>=80?'g':pct>=50?'n':'b')},r.score+'/'+r.total)),
-      h('td',null,w.map(x=>(x.q||x.id)+(x.given?' → '+x.given:'')).join(' · ')));
-  });
-  mount(header(back),h('h1',null,st.display_name),
-    h('p',{class:'sub'},'Codice: ',h('strong',null,String(st.code||'').toUpperCase())),
-    rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Quando','Esercizio','Punteggio','Errori'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'sub'},'Nessun risultato ancora.'),
+
+/* --- sblocco lezioni per gruppo di alunni --- */
+async function unlockView(c){
+  const back=()=>teacherHome();
+  mount(topbar('Sblocca lezioni',back),h('p',{class:'sub'},'Caricamento…'));
+  const [ls,en]=await Promise.all([
+    sb.from('lessons').select('id,number,title').eq('course_id',c.id).order('number'),
+    sb.from('enrollments').select('section,students(id,display_name)').eq('course_id',c.id)
+  ]);
+  if(ls.error||en.error)return mount(topbar('Sblocca lezioni',back),h('p',{class:'err'},'Errore nel caricamento.'));
+  const studs=en.data.filter(e=>e.students).sort((a,b)=>a.students.display_name.localeCompare(b.students.display_name));
+  const sel=h('select',{class:'txt sel','aria-label':'Lezione'},ls.data.map(l=>h('option',{value:l.id},'Lezione '+l.number+': '+l.title)));
+  const list=h('div',{class:'rows'});const msg=h('p',{role:'status'});
+  let access=new Set();const checks={};
+  const draw=async()=>{
+    list.replaceChildren(h('p',{class:'sub small',style:'padding:12px'},'…'));
+    const {data}=await sb.from('lesson_access').select('student_id').eq('lesson_id',sel.value);
+    access=new Set((data||[]).map(r=>r.student_id));
+    list.replaceChildren(...studs.map(e=>{
+      const st=e.students;const cb=h('input',{type:'checkbox',id:'u'+st.id});checks[st.id]=cb;
+      return h('label',{class:'row-item chk-row',for:'u'+st.id},
+        h('span',{class:'ri-l'},cb,st.display_name,e.section?h('span',{class:'tag'},e.section==='morning'?'mattina':'sera'):null),
+        h('span',{class:'pill '+(access.has(st.id)?'g':'n')},access.has(st.id)?'Sbloccata':'Bloccata'));
+    }));
+  };
+  sel.addEventListener('change',draw);
+  const act=(unlock)=>async()=>{
+    const ids=studs.map(e=>e.students.id).filter(id=>checks[id]&&checks[id].checked);
+    if(!ids.length){msg.className='err';msg.textContent='Seleziona almeno un alunno.';return}
+    const lessonId=sel.value;let error;
+    if(unlock){const me=(await sb.auth.getUser()).data.user;({error}=await sb.from('lesson_access').upsert(ids.map(id=>({student_id:id,lesson_id:lessonId,school_id:c.school_id,unlocked_by:me&&me.id})),{onConflict:'student_id,lesson_id',ignoreDuplicates:true}))}
+    else{({error}=await sb.from('lesson_access').delete().eq('lesson_id',lessonId).in('student_id',ids))}
+    if(error){msg.className='err';msg.textContent='Operazione non riuscita: '+error.message;return}
+    msg.className='ok';msg.textContent=(unlock?'Sbloccata':'Bloccata')+' per '+ids.length+' alunni.';draw();
+  };
+  const all=h('button',{class:'linkbtn small',onclick:()=>{const v=Object.values(checks).some(c=>!c.checked);Object.values(checks).forEach(c=>c.checked=v)}},'Seleziona / deseleziona tutti');
+  mount(topbar('Sblocca lezioni · '+c.name,back),
+    h('p',{class:'sub'},'Scegli la lezione, seleziona gli alunni e premi Sblocca: da quel momento la vedono nell’app. Prima non la vedono.'),
+    sel,all,list,
+    h('div',{class:'row'},h('button',{class:'primary',onclick:act(true)},'Sblocca per i selezionati'),h('button',{class:'secondary',onclick:act(false)},'Blocca')),
+    msg,footer());
+  draw();
+}
+
+/* --- scheda alunno: esercizi, presenze, progressi --- */
+async function studentSheet(st,c,tab){
+  tab=tab||'ex';
+  const back=()=>teacherHome();
+  const tb=(id,l)=>h('button',{class:'tab'+(tab===id?' on':''),onclick:()=>studentSheet(st,c,id)},h('span',null,l));
+  const head=[topbar(st.display_name,back),h('p',{class:'sub small'},c.name+' · codice ',h('strong',null,String(st.code||'').toUpperCase())),h('div',{class:'row'},tb('ex','Esercizi'),tb('pres','Presenze'),tb('prog','Progressi'))];
+  mount(head,h('p',{class:'sub'},'Caricamento…'));
+  if(tab==='pres'){
+    const {data,error}=await sb.from('attendance').select('status,joined_at,reason,note,lesson_sessions(session_date,course_id)').eq('student_id',st.id);
+    if(error)return mount(head,h('p',{class:'err'},'Errore nel caricamento.'));
+    const lab={present:['Presente','g'],absent:['Assente','b'],absent_notified:['Assente avvisato','n']};
+    const rows=data.filter(a=>a.lesson_sessions).sort((a,b)=>a.lesson_sessions.session_date<b.lesson_sessions.session_date?1:-1).map(a=>h('tr',null,
+      h('td',null,a.lesson_sessions.session_date),h('td',null,h('span',{class:'pill '+(lab[a.status]||['','n'])[1]},(lab[a.status]||[a.status])[0])),
+      h('td',null,a.joined_at?new Date(a.joined_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):''),h('td',null,[a.reason,a.note].filter(Boolean).join(' · '))));
+    const pres=data.filter(a=>a.status==='present').length,abs=data.filter(a=>a.status!=='present').length;
+    return mount(head,h('p',null,'Presenze: ',h('strong',null,pres),' · Assenze: ',h('strong',null,abs)),
+      rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Data','Stato','Ingresso','Motivo'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'sub'},'Nessuna presenza registrata.'),footer());
+  }
+  const {data,error}=await sb.from('exercise_results').select('lesson_id,exercise_idx,score,total,details,created_at,lessons(number,title)').eq('student_id',st.id).order('created_at',{ascending:false}).limit(1000);
+  if(error)return mount(head,h('p',{class:'err'},'Errore nel caricamento.'));
+  if(tab==='ex'){
+    const rows=data.slice(0,200).map(r=>{
+      const pct=r.total?Math.round(100*r.score/r.total):0;const w=(r.details&&r.details.wrong)||[];
+      return h('tr',null,h('td',null,fmtDate(r.created_at)),h('td',null,'L'+(r.lessons?r.lessons.number:'?')+' · '+((r.details&&r.details.title)||('Es. '+(r.exercise_idx+1)))),
+        h('td',null,h('span',{class:'pill '+(pct>=80?'g':pct>=50?'n':'b')},r.score+'/'+r.total)),
+        h('td',null,w.map(x=>(x.q||x.id)+(x.expected?' → '+x.expected:'')+(x.given?' (risposta: '+x.given+')':'')).join(' · ')));
+    });
+    return mount(head,rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Quando','Esercizio','Punteggio','Errori'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'sub'},'Nessun risultato ancora.'),footer());
+  }
+  // progressi: ultimo tentativo per ogni esercizio
+  const last={};data.forEach(r=>{const k=r.lesson_id+':'+r.exercise_idx;if(!last[k])last[k]=r});
+  const L=Object.values(last);
+  const pct=(a)=>{const t=a.reduce((s,r)=>s+r.total,0);return t?Math.round(100*a.reduce((s,r)=>s+r.score,0)/t):0};
+  const bar=(label,p,extra)=>h('div',{class:'bar-row'},h('span',{class:'bar-l'},label),h('div',{class:'bar-t'},h('div',{class:'bar-f '+(p>=80?'g':p>=50?'n':'b'),style:'width:'+p+'%'})),h('span',{class:'bar-v'},p+'%'+(extra||'')));
+  if(!L.length)return mount(head,h('p',{class:'sub'},'Non ci sono ancora risultati da mostrare.'),footer());
+  const byLesson={};L.forEach(r=>{const n=r.lessons?r.lessons.number:0;(byLesson[n]=byLesson[n]||[]).push(r)});
+  const byType={};L.forEach(r=>{const t=(r.details&&r.details.type)||'altro';(byType[t]=byType[t]||[]).push(r)});
+  const tn={flash:'Flash cards',match:'Abbina',quiz:'Quiz',unjumble:'Riordina la frase',cloze:'Completa la frase',group:'Dividi in gruppi',cards:'Carte per parlare',type:'Scrivi la risposta',altro:'Altro'};
+  const freq={};L.forEach(r=>((r.details&&r.details.wrong)||[]).forEach(w=>{const k=(w.q||w.id)+(w.expected?' → '+w.expected:'');freq[k]=(freq[k]||0)+1}));
+  const worst=Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  mount(head,
+    h('div',{class:'card'},h('p',{class:'sub small'},'Media complessiva (ultimo tentativo di ogni esercizio)'),h('p',{class:'sum'},pct(L)+'%'),h('p',{class:'sub small'},L.length+' esercizi svolti · '+data.length+' tentativi in totale')),
+    h('div',{class:'card'},h('h3',null,'Per lezione'),Object.keys(byLesson).sort((a,b)=>a-b).map(n=>bar('L'+n,pct(byLesson[n]),' ('+byLesson[n].length+' es.)'))),
+    h('div',{class:'card'},h('h3',null,'Per tipo di esercizio'),Object.keys(byType).map(t=>bar(tn[t]||t,pct(byType[t])))),
+    worst.length?h('div',{class:'card'},h('h3',null,'Errori più frequenti'),h('ul',{class:'small'},worst.map(([k,n])=>h('li',null,k+(n>1?' (×'+n+')':''))))):null,
     footer());
 }
+
 async function teacherAttendance(c){
-  const back=h('button',{class:'linkbtn',onclick:teacherHome},'← Indietro');
-  mount(header(back),h('h1',null,'Presenze · '+c.name),h('p',{class:'sub'},'Caricamento…'));
+  const back=()=>teacherHome();
+  mount(topbar('Presenze · '+c.name,back),h('p',{class:'sub'},'Caricamento…'));
   const {data,error}=await sb.from('attendance').select('status,joined_at,students(display_name),lesson_sessions(session_date,lesson_number,course_id)').order('created_at',{ascending:false}).limit(300);
-  if(error)return mount(header(back),h('p',{class:'err'},'Errore nel caricamento.'),footer());
+  if(error)return mount(topbar('Presenze',back),h('p',{class:'err'},'Errore nel caricamento.'));
   const mine=data.filter(a=>a.lesson_sessions&&a.lesson_sessions.course_id===c.id);
   const lab={present:['Presente','g'],absent:['Assente','b'],absent_notified:['Assente avvisato','n']};
   const rows=mine.map(a=>h('tr',null,h('td',null,a.lesson_sessions.session_date),h('td',null,a.students?a.students.display_name:''),
     h('td',null,h('span',{class:'pill '+(lab[a.status]||['',''])[1]},(lab[a.status]||[a.status])[0])),h('td',null,a.joined_at?new Date(a.joined_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):'')));
-  mount(header(back),h('h1',null,'Presenze · '+c.name),
+  mount(topbar('Presenze · '+c.name,back),
     rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Data','Studente','Stato','Ingresso'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'sub'},'Nessuna presenza registrata.'),footer());
 }
 

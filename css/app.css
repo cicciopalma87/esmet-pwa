@@ -110,3 +110,9 @@ label.chk{flex-direction:row;color:var(--ink)}
 .dr-item:hover{background:rgba(255,255,255,.1)}
 .dr-ver{margin-top:auto;padding:16px;color:#aab;font-size:.8rem}
 .dr-em{font-size:1.3rem;width:22px;text-align:center}
+
+.bar-row{display:grid;grid-template-columns:90px 1fr 70px;gap:8px;align-items:center;font-size:.85rem}
+.bar-t{background:var(--sand);border-radius:999px;height:12px;overflow:hidden}
+.bar-f{height:100%;border-radius:999px}.bar-f.g{background:var(--good)}.bar-f.n{background:#d99a00}.bar-f.b{background:var(--bad)}
+.bar-v{text-align:right;color:var(--muted)}
+.chk-row{cursor:pointer}.chk-row input{width:20px;height:20px}
