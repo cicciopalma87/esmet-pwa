@@ -23,7 +23,7 @@ function h(tag,attrs,...kids){
   for(const c of kids.flat()){if(c==null||c===false)continue;el.append(c.nodeType?c:document.createTextNode(c))}
   return el;
 }
-function mount(...nodes){$app.replaceChildren(...nodes);window.scrollTo(0,0)}
+function mount(...nodes){$app.replaceChildren(...nodes.flat(Infinity).filter(n=>n!=null&&n!==false));window.scrollTo(0,0)}
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 function norm(s){return String(s==null?'':s).toLowerCase().replace(/ß/g,'ss').replace(/[.,;:!?¡¿"“”„'’‘()…\-–—]/g,' ').replace(/\s+/g,' ').trim()}
 function fmtDate(d){return new Date(d).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
