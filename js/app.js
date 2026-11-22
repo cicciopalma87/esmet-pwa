@@ -163,6 +163,8 @@ function drawer(){
   const item=(icon,label,fn)=>h('button',{class:'dr-item',onclick:()=>{close();fn()}},ico(icon),label);
   const panel=h('div',{class:'dr-panel',role:'dialog','aria-label':'Menu'},
     h('p',{class:'dr-title'},'Esmet Academy'),
+    h('button',{class:'dr-item',onclick:()=>{close();homeView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📚'),'Lezioni'),
+    h('button',{class:'dr-item',onclick:()=>{close();registroView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📋'),'Registro'),
     item('user','Profilo (presto)',()=>{}),
     (me.courses.length>1)?item('book','Cambia corso',()=>courseSwitch()):null,
     item('out','Esci',()=>{LS.del('esmet_code');LS.del('esmet_cache');S.code=null;S.me=null;loginView()}),
@@ -180,8 +182,8 @@ function topbar(title,back){
     h('h2',null,title));
 }
 function tabs(active){
-  const t=(id,label,icon,fn)=>h('button',{class:'tab'+(active===id?' on':''),onclick:fn,'aria-current':active===id?'page':null},ico(icon),h('span',null,label));
-  return h('nav',{class:'tabbar'},t('lez','Lezioni','book',()=>homeView()),t('reg','Registro','reg',()=>registroView()));
+  const t=(id,label,em,fn)=>h('button',{class:'tab'+(active===id?' on':''),onclick:fn,'aria-current':active===id?'page':null},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
+  return h('nav',{class:'tabbar'},t('lez','Lezioni','📚',()=>homeView()),t('reg','Registro','📋',()=>registroView()));
 }
 function tabHeader(){
   const c=curCourse();
