@@ -1,5 +1,5 @@
 :root{
-  --bg:#fdf9f0; --sand:#f6ecd9; --surface:#ffffff; --ink:#1b1b1b; --muted:#5f6368; --line:#e6dcc7;
+  --bg:#ffffff; --sand:#f1efe9; --surface:#ffffff; --ink:#1b1b1b; --muted:#5f6368; --line:#e6dcc7;
   --accent:#0b59d9; --accent-ink:#ffffff; --hot:#b8352a;
   --good:#17703f; --good-bg:#dff3e7; --bad:#b3261e; --bad-bg:#fbe3e1; --sel:#e4effb; --focus:#d6336c;
   --f:'Montserrat',system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -7,7 +7,7 @@
 :root{color-scheme:light}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f);font-size:16px;line-height:1.5;
+body{margin:0;background:#fff url(../icons/bg-wave.jpg) no-repeat center bottom fixed;background-size:max(100%,900px) auto;color:var(--ink);font-family:var(--f);font-size:16px;line-height:1.5;
   padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(40px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
 .wrap{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
 h1{font-size:clamp(1.5rem,5vw,2rem);line-height:1.15;margin:0;color:var(--accent);font-weight:700;text-wrap:balance}
