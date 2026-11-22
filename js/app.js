@@ -536,18 +536,33 @@ async function teacherEntry(){
   if(data.session)return teacherHome();
   teacherLogin();
 }
-function teacherLogin(msg){
+function teacherLogin(msg,mode){
+  mode=mode||'login';
   const em=h('input',{class:'txt',type:'email',autocomplete:'username',placeholder:'Email'});
-  const pw=h('input',{class:'txt',type:'password',autocomplete:'current-password',placeholder:'Password'});
+  const pw=h('input',{class:'txt',type:'password',autocomplete:mode==='login'?'current-password':'new-password',placeholder:mode==='login'?'Password':'Scegli una password (almeno 8 caratteri)'});
+  const pw2=h('input',{class:'txt',type:'password',autocomplete:'new-password',placeholder:'Ripeti la password'});
   const err=h('p',{class:'err',role:'alert'},msg||'');
-  const go=async()=>{
+  const ok=h('p',{class:'ok',role:'status'});
+  const goLogin=async()=>{
     const {error}=await sb.auth.signInWithPassword({email:em.value.trim(),password:pw.value});
-    if(error){err.textContent='Email o password non corretti.';return}
+    if(error){err.textContent=/confirm/i.test(error.message)?'Devi prima confermare l’email: controlla la posta.':'Email o password non corretti.';return}
     teacherHome();
   };
-  pw.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
-  mount(h('img',{class:'logo-big',src:'icons/logo.png',alt:'Esmet Academy'}),h('h1',null,'Area docenti'),
-    h('div',{class:'card'},em,pw,h('button',{class:'primary',onclick:go},'Accedi'),err),
+  const goSignup=async()=>{
+    err.textContent='';ok.textContent='';
+    if(pw.value.length<8){err.textContent='La password deve avere almeno 8 caratteri.';return}
+    if(pw.value!==pw2.value){err.textContent='Le due password non coincidono.';return}
+    const {error}=await sb.auth.signUp({email:em.value.trim(),password:pw.value,options:{emailRedirectTo:location.origin+location.pathname+'#docente'}});
+    if(error){err.textContent=/abilitata|Database error/i.test(error.message)?'Questa email non è abilitata. Contatta la scuola.':'Non è stato possibile completare: '+error.message;return}
+    ok.textContent='Fatto! Ti abbiamo inviato una email: apri il link di conferma, poi accedi con la tua password.';
+  };
+  const go=mode==='login'?goLogin:goSignup;
+  (mode==='login'?pw:pw2).addEventListener('keydown',e=>{if(e.key==='Enter')go()});
+  mount(h('img',{class:'logo-big',src:'icons/logo.png',alt:'Esmet Academy'}),
+    h('h1',null,mode==='login'?'Area docenti':'Primo accesso'),
+    mode==='signup'?h('p',{class:'sub'},'Usa l’email che hai comunicato alla scuola e scegli la tua password.'):null,
+    h('div',{class:'card'},em,pw,mode==='signup'?pw2:null,h('button',{class:'primary',onclick:go},mode==='login'?'Accedi':'Crea password'),err,ok),
+    h('p',{class:'sub small'},mode==='login'?h('button',{class:'linkbtn small',onclick:()=>teacherLogin('','signup')},'Primo accesso? Crea la tua password'):h('button',{class:'linkbtn small',onclick:()=>teacherLogin()},'Hai già una password? Accedi')),
     h('p',{class:'sub small'},h('a',{href:'./',onclick:()=>{location.hash='';setTimeout(()=>location.reload(),0)}},'← Area studenti')),footer());
 }
 async function teacherHome(){
