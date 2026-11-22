@@ -298,7 +298,6 @@ function lessonView(c,l){
   mount(topbar('Lezione '+l.number,()=>homeView()),
     h('p',{class:'sub'},l.title),
     h('div',{class:'rows'},rows),
-    h('div',{class:'rows'},h('button',{class:'row-item',onclick:()=>reportView(c,l)},h('span',{class:'ri-l'},ico('flag'),'Invia resoconto alla docente'),ico('chev'))),
     footer());
 }
 function exView(c,l,i){
