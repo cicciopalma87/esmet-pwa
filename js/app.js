@@ -165,6 +165,7 @@ function drawer(){
     h('p',{class:'dr-title'},'Esmet Academy'),
     h('button',{class:'dr-item',onclick:()=>{close();homeView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📚'),'Lezioni'),
     h('button',{class:'dr-item',onclick:()=>{close();registroView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📋'),'Registro'),
+    h('button',{class:'dr-item',onclick:()=>{close();lavagneView()}},h('span',{class:'dr-em','aria-hidden':'true'},'🖼️'),'Lavagne'),
     item('user','Profilo (presto)',()=>{}),
     (me.courses.length>1)?item('book','Cambia corso',()=>courseSwitch()):null,
     item('out','Esci',()=>{LS.del('esmet_code');LS.del('esmet_cache');S.code=null;S.me=null;loginView()}),
@@ -183,7 +184,7 @@ function topbar(title,back){
 }
 function tabs(active){
   const t=(id,label,em,fn)=>h('button',{class:'tab'+(active===id?' on':''),onclick:fn,'aria-current':active===id?'page':null},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
-  return h('nav',{class:'tabbar'},t('lez','Lezioni','📚',()=>homeView()),t('reg','Registro','📋',()=>registroView()));
+  return h('nav',{class:'tabbar'},t('lez','Lezioni','📚',()=>homeView()),t('reg','Registro','📋',()=>registroView()),t('lav','Lavagne','🖼️',()=>lavagneView()));
 }
 function tabHeader(){
   const c=curCourse();
@@ -581,9 +582,97 @@ async function teacherHome(){
         h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
       h('div',{class:'row'},
         h('button',{class:'primary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
-        h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
+        h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
   });
   mount(header(out),h('h1',null,'Area docenti'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),footer());
+}
+
+
+/* ---------- lavagne ---------- */
+const wbUrl=p=>CFG.url+'/storage/v1/object/public/lavagne/'+p;
+const isImg=w=>(w.mime||'').startsWith('image/');
+function wbThumb(w,onclick){
+  return h('button',{class:'wb-th',onclick,'aria-label':'Apri '+(w.title||'lavagna')},
+    isImg(w)?h('img',{src:wbUrl(w.path),alt:'',loading:'lazy'}):h('span',{class:'wb-pdf'},'📄'),
+    h('span',{class:'wb-t'},w.title||'Lavagna'));
+}
+async function wbDownload(w){
+  try{const r=await fetch(wbUrl(w.path));const b=await r.blob();const u=URL.createObjectURL(b);
+    const ext=(w.path.split('.').pop()||'bin');
+    const a=h('a',{href:u,download:'Lavagna_L'+w.lesson+'_'+(w.title||'').replace(/[^\w]+/g,'_')+'.'+ext});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000)}
+  catch(e){window.open(wbUrl(w.path),'_blank')}
+}
+function wbPreview(w){
+  const close=()=>ov.remove();
+  const body=isImg(w)?h('img',{src:wbUrl(w.path),alt:w.title||'Lavagna',class:'wb-big'}):h('iframe',{src:wbUrl(w.path),class:'wb-frame',title:w.title||'Lavagna'});
+  const ov=h('div',{class:'dr-ov',onclick:e=>{if(e.target===ov)close()}},
+    h('div',{class:'wb-modal',role:'dialog'},
+      h('p',null,h('strong',null,'Lezione '+w.lesson+(w.title?' · '+w.title:''))),
+      body,
+      h('div',{class:'row'},
+        h('button',{class:'primary',onclick:()=>wbDownload(w)},'Scarica'),
+        h('a',{class:'secondary btnlink',href:wbUrl(w.path),target:'_blank',rel:'noopener'},'Apri'),
+        h('button',{class:'secondary',onclick:close},'Chiudi'))));
+  document.body.append(ov);
+}
+async function lavagneView(sel){
+  mount(tabHeader(),h('h3',{class:'sect'},'Lavagne'),h('p',{class:'sub'},'Caricamento…'),tabs('lav'));
+  let list=[];let off=false;
+  try{const {data,error}=await sb.rpc('student_whiteboards',{p_code:S.code});if(error)throw error;list=data||[];LS.set('esmet_wb',list)}
+  catch(e){list=LS.get('esmet_wb',[]);off=true}
+  const c=curCourse();
+  list=list.filter(w=>!c||w.course_id===c.id);
+  const nums=[...new Set(list.map(w=>w.lesson))].sort((a,b)=>b-a);
+  if(!nums.length)return mount(tabHeader(),h('h3',{class:'sect'},'Lavagne'),h('p',{class:'sub'},'Nessuna lavagna disponibile per ora.'),tabs('lav'),footer());
+  const cur=sel&&nums.includes(sel)?sel:nums[0];
+  const selL=h('select',{class:'txt sel','aria-label':'Lezione'},nums.map(n=>h('option',{value:n,selected:n===cur},'Lezione '+n)));
+  selL.addEventListener('change',()=>lavagneView(+selL.value));
+  const items=list.filter(w=>w.lesson===cur);
+  mount(tabHeader(),h('h3',{class:'sect'},'Lavagne'),
+    off?h('p',{class:'sub small'},'Sei offline: elenco dell’ultimo accesso.'):null,
+    h('div',{class:'row'},h('span',{class:'chip'},c?c.name:''),selL),
+    h('div',{class:'wb-grid'},items.map(w=>wbThumb(w,()=>wbPreview(w)))),
+    tabs('lav'),footer());
+}
+
+/* docente: carica e gestisci lavagne di un corso */
+async function teacherWhiteboards(c){
+  const back=()=>teacherHome();
+  mount(topbar('Lavagne · '+c.name,back),h('p',{class:'sub'},'Caricamento…'));
+  const {data,error}=await sb.from('whiteboards').select('id,course_id,lesson_number,title,path,mime').eq('course_id',c.id).order('lesson_number',{ascending:false});
+  if(error)return mount(topbar('Lavagne',back),h('p',{class:'err'},'Errore nel caricamento.'));
+  const list=data.map(w=>({...w,lesson:w.lesson_number}));
+  const num=h('input',{class:'txt',type:'number',min:'1',max:'200',placeholder:'N. lezione','aria-label':'Numero lezione'});
+  const ttl=h('input',{class:'txt',type:'text',placeholder:'Titolo (facoltativo)','aria-label':'Titolo'});
+  const file=h('input',{type:'file',accept:'image/*,application/pdf',multiple:'multiple'});
+  const msg=h('p',{role:'status'});
+  const up=h('button',{class:'primary',onclick:async()=>{
+    const n=parseInt(num.value,10);const fs=[...file.files];
+    if(!n||n<1){msg.className='err';msg.textContent='Scrivi il numero della lezione.';return}
+    if(!fs.length){msg.className='err';msg.textContent='Scegli almeno un file (foto o PDF).';return}
+    up.disabled=true;msg.className='sub';msg.textContent='Caricamento…';
+    let ok=0;
+    for(const f of fs){
+      const ext=((f.name.split('.').pop()||'bin')+'').toLowerCase().replace(/[^a-z0-9]/g,'');
+      const path=c.id+'/'+crypto.randomUUID()+'.'+ext;
+      const u=await sb.storage.from('lavagne').upload(path,f,{contentType:f.type||undefined});
+      if(u.error){msg.className='err';msg.textContent='Caricamento non riuscito: '+u.error.message;up.disabled=false;return}
+      const t=ttl.value.trim()||(fs.length>1?f.name.replace(/\.[^.]+$/,''):'');
+      const r=await sb.from('whiteboards').insert({school_id:c.school_id,course_id:c.id,lesson_number:n,title:t||null,path,mime:f.type||null});
+      if(r.error){await sb.storage.from('lavagne').remove([path]);msg.className='err';msg.textContent='Salvataggio non riuscito: '+r.error.message;up.disabled=false;return}
+      ok++;
+    }
+    teacherWhiteboards(c);
+  }},'Carica');
+  const byN={};list.forEach(w=>(byN[w.lesson]=byN[w.lesson]||[]).push(w));
+  const groups=Object.keys(byN).sort((a,b)=>b-a).map(n=>h('div',{class:'card'},h('h3',null,'Lezione '+n),
+    h('div',{class:'wb-grid'},byN[n].map(w=>h('div',{class:'wb-cell'},wbThumb(w,()=>wbPreview(w)),
+      h('button',{class:'linkbtn small',onclick:async()=>{
+        if(!confirm('Eliminare questa lavagna? Gli alunni non la vedranno più.'))return;
+        await sb.from('whiteboards').delete().eq('id',w.id);await sb.storage.from('lavagne').remove([w.path]);teacherWhiteboards(c)}},'Elimina'))))));
+  mount(topbar('Lavagne · '+c.name,back),
+    h('div',{class:'card'},h('h3',null,'Carica una lavagna'),h('p',{class:'sub small'},'Foto/screenshot o PDF (max 20 MB). Gli alunni del corso la vedono subito nella sezione Lavagne, sotto il numero di lezione indicato.'),num,ttl,file,up,msg),
+    groups.length?groups:h('p',{class:'sub'},'Ancora nessuna lavagna caricata.'),footer());
 }
 
 /* --- sblocco lezioni per gruppo di alunni --- */
