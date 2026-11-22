@@ -25,7 +25,7 @@ function h(tag,attrs,...kids){
 }
 function mount(...nodes){$app.replaceChildren(...nodes.flat(Infinity).filter(n=>n!=null&&n!==false));window.scrollTo(0,0)}
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
-function norm(s){return String(s==null?'':s).toLowerCase().replace(/ß/g,'ss').replace(/[.,;:!?¡¿"“”„'’‘()…\-–—]/g,' ').replace(/\s+/g,' ').trim()}
+function norm(s){return String(s==null?'':s).toLowerCase().replace(/ß/g,'ss').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/[.,;:!?¡¿"“”„'’‘()…\-–—]/g,' ').replace(/\s+/g,' ').trim()}
 function fmtDate(d){return new Date(d).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
 function header(right){
   return h('div',{class:'top'},h('img',{src:'icons/logo.png',alt:'Esmet Academy'}),right||null);
@@ -81,10 +81,10 @@ function loginView(msg){
   inp.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
   mount(
     h('img',{class:'logo-big',src:'icons/logo.png',alt:'Esmet Academy'}),
-    h('h1',null,'Benvenuta, benvenuto!'),
-    h('p',{class:'sub'},'Inserisci il codice personale che ti ha dato la tua insegnante.'),
+    h('h1',null,'Benvenuto!'),
+    h('p',{class:'sub'},'Inserisci il codice personale che ti ha dato la scuola.'),
     h('div',{class:'card'},inp,btn,err),
-    h('p',{class:'sub small'},'Sei un’insegnante? ',h('a',{href:'#docente',onclick:()=>setTimeout(()=>location.reload(),0)},'Accedi qui')),
+    h('p',{class:'sub small'},'Sei un docente? ',h('a',{href:'#docente',onclick:()=>setTimeout(()=>location.reload(),0)},'Accedi qui')),
     footer()
   );
 }
@@ -124,7 +124,7 @@ function consentView(){
     h('h1',null,'Ciao '+S.me.name+'!'),
     h('div',{class:'card'},
       h('h2',null,'Prima di iniziare'),
-      h('p',null,'Questa app registra i tuoi risultati negli esercizi (punteggi, frasi sbagliate, presenza alle lezioni) per permettere alla tua insegnante di seguire i tuoi progressi e aiutarti dove serve.'),
+      h('p',null,'Questa app registra i tuoi risultati negli esercizi (punteggi, frasi sbagliate, presenza alle lezioni) per permettere ai tuoi docenti di seguire i tuoi progressi e aiutarti dove serve.'),
       h('p',null,'Salviamo solo il tuo nome e un codice personale. I dati sono usati esclusivamente da Esmet Academy per la didattica, sono protetti con cifratura in transito e a riposo e non vengono ceduti a terzi.'),
       h('label',{class:'chk',for:'cn'},chk,h('span',null,'Ho letto e accetto il trattamento dei miei dati per queste finalità.')),
       btn,err),
@@ -572,7 +572,7 @@ async function teacherHome(){
     sb.from('courses').select('id,name,level,kind,zoom_url').eq('active',true).order('name'),
     sb.from('enrollments').select('course_id,section,students(id,display_name,code,consent_at)')
   ]);
-  if(cs.error||en.error)return mount(header(out),h('p',{class:'err'},'Errore nel caricamento. Sei sicuro di avere un profilo docente?'),footer());
+  if(cs.error||en.error)return mount(header(out),h('p',{class:'err'},'Errore nel caricamento. Il tuo account ha un profilo docente?'),footer());
   const blocks=cs.data.map(c=>{
     const studs=en.data.filter(e=>e.course_id===c.id&&e.students);
     return h('section',{class:'card'},h('h2',null,c.name),h('p',{class:'sub'},c.level+' · '+studs.length+' studenti'),
