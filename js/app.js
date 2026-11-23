@@ -281,12 +281,14 @@ function tabs(active){
 }
 function tabHeader(){
   const c=curCourse();
-  return h('div',{class:'thead'},
-    h('div',{class:'avatar','aria-hidden':'true'},(S.me.name||'?').trim().charAt(0).toUpperCase()),
-    h('div',{class:'tname'},h('strong',null,S.me.name),h('span',{class:'sub small'},c?c.name:'')),
-    h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:drawer},ico('menu')));
+  return h('div',{class:'thead2'},
+    h('div',{class:'thead-top'},
+      h('img',{class:'logo-sm',src:'icons/logo.png',alt:'Esmet Academy'}),
+      h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:drawer},ico('menu'))),
+    h('div',{class:'thead'},
+      h('div',{class:'avatar','aria-hidden':'true'},(S.me.name||'?').trim().charAt(0).toUpperCase()),
+      h('div',{class:'tname'},h('strong',null,S.me.name),h('span',{class:'sub small'},c?c.name:''))));
 }
-
 
 function joinBlock(c){
   const joinMsg=h('p',{class:'sub small',role:'status'});
@@ -389,23 +391,24 @@ async function profileView(){
   mount(topbar('Il mio profilo',back),h('p',{class:'sub'},'Caricamento…'));
   const {data}=await sb.rpc('student_get_profile',{p_code:S.code});
   const p=data||{};
+  const nm=h('input',{class:'txt',type:'text',autocomplete:'name',value:p.name||S.me.name||'',placeholder:'Nome e cognome',maxlength:'80'});
   const ph=h('input',{class:'txt',type:'tel',autocomplete:'tel',value:p.phone||'',placeholder:'Telefono'});
   const ci=h('input',{class:'txt',type:'text',autocomplete:'address-level2',value:p.city||'',placeholder:'Città'});
   const bd=h('input',{class:'txt',type:'date',value:p.birth_date||''});
   const msg=h('p',{role:'status'});
   const save=h('button',{class:'primary',onclick:async()=>{
     save.disabled=true;
-    const {error}=await sb.rpc('student_save_profile',{p_code:S.code,p_phone:ph.value,p_city:ci.value,p_birth:bd.value||null});
+    const {error}=await sb.rpc('student_save_profile',{p_code:S.code,p_name:nm.value,p_phone:ph.value,p_city:ci.value,p_birth:bd.value||null});
     save.disabled=false;
     msg.className=error?'err':'ok';msg.textContent=error?'Non sono riuscito a salvare. Riprova.':'Dati salvati.';
+    if(!error&&nm.value.trim()){S.me.name=nm.value.trim();LS.set('esmet_cache',S.me)}
   }},'Salva');
   mount(topbar('Il mio profilo',back),
     h('div',{class:'card'},
-      h('p',null,h('strong',null,S.me.name)),
       (S.acc&&S.acc.email)?h('p',{class:'sub small'},'Email di accesso: '+S.acc.email):null,
-      h('label',null,'Telefono',ph),h('label',null,'Città',ci),h('label',null,'Data di nascita',bd),
+      h('label',null,'Nome e cognome',nm),h('label',null,'Telefono',ph),h('label',null,'Città',ci),h('label',null,'Data di nascita',bd),
       save,msg,
-      h('p',{class:'sub small'},'Per correggere il nome o cambiare l’email scrivi all’assistenza.'),
+      h('p',{class:'sub small'},'Per cambiare l’email scrivi all’assistenza.'),
       h('button',{class:'linkbtn small',onclick:()=>ticketView('Dati personali')},'Apri un ticket')),
     footer());
 }
@@ -979,17 +982,55 @@ async function studentSheet(st,c,tab){
     footer());
 }
 
-async function teacherAttendance(c){
+async function teacherAttendance(c,sid){
   const back=()=>teacherHome();
   mount(topbar('Presenze · '+c.name,back),h('p',{class:'sub'},'Caricamento…'));
-  const {data,error}=await sb.from('attendance').select('status,joined_at,students(display_name),lesson_sessions(session_date,lesson_number,course_id)').order('created_at',{ascending:false}).limit(300);
-  if(error)return mount(topbar('Presenze',back),h('p',{class:'err'},'Errore nel caricamento.'));
-  const mine=data.filter(a=>a.lesson_sessions&&a.lesson_sessions.course_id===c.id);
-  const lab={present:['Presente','g'],absent:['Assente','b'],absent_notified:['Assente avvisato','n']};
-  const rows=mine.map(a=>h('tr',null,h('td',null,a.lesson_sessions.session_date),h('td',null,a.students?a.students.display_name:''),
-    h('td',null,h('span',{class:'pill '+(lab[a.status]||['',''])[1]},(lab[a.status]||[a.status])[0])),h('td',null,a.joined_at?new Date(a.joined_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):'')));
-  mount(topbar('Presenze · '+c.name,back),
-    rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Data','Studente','Stato','Ingresso'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'sub'},'Nessuna presenza registrata.'),footer());
+  const ss=await sb.from('lesson_sessions').select('id,session_date,start_time,end_time,section,status').eq('course_id',c.id).order('session_date',{ascending:false}).order('start_time',{ascending:false}).limit(80);
+  if(ss.error)return mount(topbar('Presenze',back),h('p',{class:'err'},'Errore nel caricamento.'));
+  const sessions=ss.data;
+  if(!sessions.length)return mount(topbar('Presenze · '+c.name,back),h('p',{class:'sub'},'Non ci sono ancora lezioni in calendario per questo corso.'),footer());
+  const todayK=isoD(new Date());
+  const def=sid||(sessions.filter(x=>x.session_date<=todayK)[0]||sessions[sessions.length-1]).id;
+  const lab=x=>x.session_date.split('-').reverse().join('/')+' '+(x.start_time||'').slice(0,5)+(x.section==='morning'?' · mattina':x.section==='evening'?' · sera':'');
+  const sel=h('select',{class:'txt sel','aria-label':'Lezione'},sessions.map(x=>h('option',{value:x.id,selected:x.id===def},lab(x))));
+  sel.addEventListener('change',()=>teacherAttendance(c,sel.value));
+  const cur=sessions.find(x=>x.id===def);
+  const [en,at,rs]=await Promise.all([
+    sb.from('enrollments').select('section,students(id,display_name)').eq('course_id',c.id),
+    sb.from('attendance').select('student_id,status,camera_off,mic_off').eq('session_id',def),
+    sb.from('session_responses').select('student_id,response,status,note').eq('session_id',def)]);
+  if(en.error||at.error)return mount(topbar('Presenze',back),h('p',{class:'err'},'Errore nel caricamento.'));
+  const roster=en.data.filter(e=>e.students&&(!e.section||!cur.section||e.section===cur.section)).sort((a,b)=>a.students.display_name.localeCompare(b.students.display_name));
+  const A={};at.data.forEach(r=>A[r.student_id]=r);const R={};(rs.data||[]).forEach(r=>R[r.student_id]=r);
+  const conf=Object.values(R).filter(r=>r.response==='confirm').length;
+  const moves=Object.values(R).filter(r=>r.response==='move_request');
+  const ctl={};
+  const rows=roster.map(e=>{
+    const st=e.students,a=A[st.id]||{};
+    const sl=h('select',{class:'txt sel','aria-label':'Stato '+st.display_name},[['','—'],['present','Presente'],['absent','Assente'],['absent_notified','Assente avvisato']].map(([v,t])=>h('option',{value:v,selected:(a.status||'')===v},t)));
+    const cam=h('input',{type:'checkbox',checked:!!a.camera_off,'aria-label':'Telecamera spenta'});
+    const mic=h('input',{type:'checkbox',checked:!!a.mic_off,'aria-label':'Microfono spento'});
+    ctl[st.id]={sl,cam,mic};
+    const r=R[st.id];
+    return h('div',{class:'att-row'},
+      h('div',{class:'att-name'},st.display_name,r?h('span',{class:'tag'},r.response==='confirm'?'confermata':'chiede spostamento'):null),
+      sl,
+      h('label',{class:'att-chk'},cam,'Cam spenta'),h('label',{class:'att-chk'},mic,'Mic spento'));
+  });
+  const msg=h('p',{role:'status'});
+  const save=h('button',{class:'primary',onclick:async()=>{
+    save.disabled=true;
+    const rowsUp=roster.map(e=>e.students.id).filter(id=>ctl[id].sl.value).map(id=>({session_id:def,student_id:id,school_id:c.school_id,status:ctl[id].sl.value,camera_off:ctl[id].cam.checked,mic_off:ctl[id].mic.checked}));
+    let error=null;
+    if(rowsUp.length){({error}=await sb.from('attendance').upsert(rowsUp,{onConflict:'session_id,student_id'}))}
+    if(!error)await sb.from('lesson_sessions').update({status:'held'}).eq('id',def);
+    save.disabled=false;
+    msg.className=error?'err':'ok';msg.textContent=error?'Non sono riuscita a salvare: '+error.message:'Presenze salvate.';
+  }},'Salva presenze');
+  mount(topbar('Presenze · '+c.name,back),sel,
+    h('p',{class:'sub small'},conf+' '+(conf===1?'confermata':'confermate')+' su '+roster.length+(moves.length?' · '+moves.length+' richiesta/e di spostamento'+': '+moves.map(m=>{const e=roster.find(x=>x.students.id===m.student_id);return (e?e.students.display_name:'')+(m.note?' ('+m.note+')':'')}).join(', '):'')),
+    h('p',{class:'sub small'},'Cam e mic spenti sono visibili solo ai docenti. L’alunno vede soltanto presente/assente.'),
+    h('div',{class:'att-list'},rows),save,msg,footer());
 }
 
 /* ---------- boot ---------- */

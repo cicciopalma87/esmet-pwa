@@ -132,3 +132,11 @@ label.chk{flex-direction:row;color:var(--ink)}
 .lc-time{font-weight:700;min-width:92px;font-size:.9rem}.lc-main{display:flex;flex-direction:column;flex:1;min-width:0}
 .lc-actions{display:flex;flex-wrap:wrap;gap:8px;padding:0 14px 12px}.lc-actions[hidden]{display:none}.lc>p{padding:0 14px}
 .weeklab{flex:1;text-align:center;font-size:.9rem}.datepill.today{background:var(--accent,#2b4fb8);color:#fff}
+
+.thead2{display:flex;flex-direction:column;gap:6px}.thead-top{display:flex;align-items:center;justify-content:space-between}
+.logo-sm{height:38px;width:auto}
+.att-list{display:flex;flex-direction:column;gap:10px}
+.att-row{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px}
+.att-name{grid-column:1/-1;font-weight:600}
+.att-row .sel{grid-column:1/-1}
+.att-chk{display:inline-flex;gap:6px;align-items:center;font-size:.85rem}.att-chk input{width:18px;height:18px}
