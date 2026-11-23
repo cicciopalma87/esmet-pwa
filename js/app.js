@@ -1150,15 +1150,15 @@ async function studentSheet(st,c,tab){
   const head=[topbar(st.display_name,back),h('p',{class:'sub small'},c.name+' · codice ',h('strong',null,String(st.code||'').toUpperCase())),h('div',{class:'row'},tb('ex','Esercizi'),tb('pres','Presenze'),tb('prog','Progressi'))];
   mount(head,h('p',{class:'sub'},'Caricamento…'));
   if(tab==='pres'){
-    const {data,error}=await sb.from('attendance').select('status,joined_at,reason,note,lesson_sessions(session_date,course_id)').eq('student_id',st.id);
+    const {data,error}=await sb.from('attendance').select('status,joined_at,reason,note,camera_off,mic_off,teacher_note,lesson_sessions(session_date,course_id)').eq('student_id',st.id);
     if(error)return mount(head,h('p',{class:'err'},'Errore nel caricamento.'));
     const lab={present:['Presente','g'],absent:['Assente','b'],absent_notified:['Assente avvisato','n']};
     const rows=data.filter(a=>a.lesson_sessions).sort((a,b)=>a.lesson_sessions.session_date<b.lesson_sessions.session_date?1:-1).map(a=>h('tr',null,
       h('td',null,a.lesson_sessions.session_date),h('td',null,h('span',{class:'pill '+(lab[a.status]||['','n'])[1]},(lab[a.status]||[a.status])[0])),
-      h('td',null,a.joined_at?new Date(a.joined_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):''),h('td',null,[a.reason,a.note].filter(Boolean).join(' · '))));
+      h('td',null,a.joined_at?new Date(a.joined_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):''),h('td',null,[a.reason,a.note].filter(Boolean).join(' · ')),h('td',null,[a.camera_off?'cam spenta':'',a.mic_off?'mic spento':'',a.teacher_note].filter(Boolean).join(' · '))));
     const pres=data.filter(a=>a.status==='present').length,abs=data.filter(a=>a.status!=='present').length;
     return mount(head,h('p',null,'Presenze: ',h('strong',null,pres),' · Assenze: ',h('strong',null,abs)),
-      rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Data','Stato','Ingresso','Motivo'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'sub'},'Nessuna presenza registrata.'),footer());
+      rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Data','Stato','Ingresso','Motivo alunno','Note docente'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'sub'},'Nessuna presenza registrata.'),footer());
   }
   const {data,error}=await sb.from('exercise_results').select('lesson_id,exercise_idx,score,total,details,created_at,lessons(number,title)').eq('student_id',st.id).order('created_at',{ascending:false}).limit(1000);
   if(error)return mount(head,h('p',{class:'err'},'Errore nel caricamento.'));
@@ -1205,7 +1205,7 @@ async function teacherAttendance(c,sid){
   const cur=sessions.find(x=>x.id===def);
   const [en,at,rs]=await Promise.all([
     sb.from('enrollments').select('section,students(id,display_name)').eq('course_id',c.id),
-    sb.from('attendance').select('student_id,status,camera_off,mic_off').eq('session_id',def),
+    sb.from('attendance').select('student_id,status,camera_off,mic_off,teacher_note').eq('session_id',def),
     sb.from('session_responses').select('student_id,response,status,note').eq('session_id',def)]);
   if(en.error||at.error)return mount(topbar('Presenze',back),h('p',{class:'err'},'Errore nel caricamento.'));
   const roster=en.data.filter(e=>e.students&&(!e.section||!cur.section||e.section===cur.section));
@@ -1220,17 +1220,21 @@ async function teacherAttendance(c,sid){
     const sl=h('select',{class:'txt sel','aria-label':'Stato '+st.display_name},[['','—'],['present','Presente'],['absent','Assente'],['absent_notified','Assente avvisato']].map(([v,t])=>h('option',{value:v,selected:(a.status||'')===v},t)));
     const cam=h('input',{type:'checkbox',checked:!!a.camera_off,'aria-label':'Telecamera spenta'});
     const mic=h('input',{type:'checkbox',checked:!!a.mic_off,'aria-label':'Microfono spento'});
-    ctl[st.id]={sl,cam,mic};
+    const nt=h('textarea',{class:'txt att-note',rows:'2',maxlength:'800',placeholder:'Note (solo docenti e amministrazione): es. camera spenta ma seguiva, distratto, non partecipava…','aria-label':'Note su '+st.display_name});
+    nt.value=a.teacher_note||'';
+    ctl[st.id]={sl,cam,mic,nt};
     const r=R[st.id];
     return h('div',{class:'att-row'},
       h('div',{class:'att-name'},st.display_name,r?h('span',{class:'tag'},r.response==='confirm'?'confermata':'chiede spostamento'):null),
       sl,
-      h('label',{class:'att-chk'},cam,'Cam spenta'),h('label',{class:'att-chk'},mic,'Mic spento'));
+      h('label',{class:'att-chk'},cam,'Cam spenta'),h('label',{class:'att-chk'},mic,'Mic spento'),nt);
   });
   const msg=h('p',{role:'status'});
   const save=h('button',{class:'primary',onclick:async()=>{
+    const orphan=roster.find(e=>!ctl[e.students.id].sl.value&&(ctl[e.students.id].nt.value.trim()||ctl[e.students.id].cam.checked||ctl[e.students.id].mic.checked));
+    if(orphan){msg.className='err';msg.textContent='Imposta lo stato (presente/assente) di '+orphan.students.display_name+' prima di salvare note o cam/mic.';return}
     save.disabled=true;
-    const rowsUp=roster.map(e=>e.students.id).filter(id=>ctl[id].sl.value).map(id=>({session_id:def,student_id:id,school_id:c.school_id,status:ctl[id].sl.value,camera_off:ctl[id].cam.checked,mic_off:ctl[id].mic.checked}));
+    const rowsUp=roster.map(e=>e.students.id).filter(id=>ctl[id].sl.value).map(id=>({session_id:def,student_id:id,school_id:c.school_id,status:ctl[id].sl.value,camera_off:ctl[id].cam.checked,mic_off:ctl[id].mic.checked,teacher_note:ctl[id].nt.value.trim()||null}));
     let error=null;
     if(rowsUp.length){({error}=await sb.from('attendance').upsert(rowsUp,{onConflict:'session_id,student_id'}))}
     if(!error)await sb.from('lesson_sessions').update({status:'held'}).eq('id',def);
