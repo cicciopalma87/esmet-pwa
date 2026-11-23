@@ -64,8 +64,16 @@ async function submitResult(lesson,idx,res){
 async function start(){
   if(location.hash==='#docente'){return teacherEntry()}
   if(S.code){return studentLoad(S.code)}
+  try{
+    const {data}=await sb.auth.getSession();
+    if(data&&data.session){
+      const r=await sb.rpc('my_student_code');
+      if(r.data){return studentLoad(r.data)}
+    }
+  }catch(e){}
   loginView();
 }
+sb.auth.onAuthStateChange((ev)=>{if(ev==='PASSWORD_RECOVERY'&&location.hash!=='#docente')setTimeout(newPasswordView,0)});
 
 /* ---------- student: login ---------- */
 function loginView(msg){
@@ -84,6 +92,7 @@ function loginView(msg){
     h('h1',null,'Benvenuto!'),
     h('p',{class:'sub'},'Inserisci il codice personale che ti ha dato la scuola.'),
     h('div',{class:'card'},inp,btn,err),
+    h('p',{class:'sub small'},'Hai già creato il tuo accesso? ',h('button',{class:'linkbtn',onclick:()=>emailLoginView()},'Entra con email e password')),
     h('p',{class:'sub small'},'Sei un docente? ',h('a',{href:'#docente',onclick:()=>setTimeout(()=>location.reload(),0)},'Accedi qui')),
     footer()
   );
@@ -98,6 +107,8 @@ async function studentLoad(code,fromLogin,errEl){
     }
     S.code=code;LS.set('esmet_code',code);LS.set('esmet_cache',data);S.me=data;
     flushQueue();
+    S.acc=null;
+    try{const a=await sb.rpc('student_account_status',{p_code:code});S.acc=a.data||null}catch(e){}
     if(!data.consent_at)return consentView();
     homeView();
   }catch(e){
@@ -106,6 +117,85 @@ async function studentLoad(code,fromLogin,errEl){
     if(errEl)errEl.textContent='Connessione assente o servizio non raggiungibile. Riprova.';
     else loginView('Connessione assente. Riprova.');
   }
+}
+
+
+/* ---------- accesso con email e password (alunni) ---------- */
+function accountBanner(){
+  const a=S.acc;if(!a||a.state==='ok')return null;
+  return h('button',{class:'notice',onclick:()=>accountView()},
+    a.state==='none'?'👤 Crea il tuo accesso con email e password: così entri da telefono e PC senza il codice.'
+                    :'✉️ Conferma la tua email: clicca il link che ti abbiamo inviato, altrimenti non potrai entrare con email e password.');
+}
+function pwField(ph){return h('input',{class:'txt',type:'password',autocomplete:'new-password',placeholder:ph,'aria-label':ph})}
+function accountView(){
+  const back=()=>homeView();
+  const a=S.acc||{state:'none'};
+  if(a.state==='ok')return mount(topbar('Il mio accesso',back),h('div',{class:'card'},h('p',null,'Accesso con email attivo ✅'),h('p',{class:'sub small'},a.email||''),h('p',{class:'sub small'},'Per cambiare email o password apri un ticket di assistenza.')),footer());
+  if(a.state==='pending'){
+    const m=h('p',{role:'status',class:'sub small'});
+    return mount(topbar('Il mio accesso',back),h('div',{class:'card'},
+      h('p',null,'Ti abbiamo inviato un’email a ',h('strong',null,a.email||'')),
+      h('p',{class:'sub small'},'Apri il messaggio e clicca sul link per confermare. Controlla anche la cartella spam. Finché non confermi, continua a entrare con il codice.'),
+      h('button',{class:'secondary',onclick:async()=>{const {error}=await sb.auth.resend({type:'signup',email:a.email,options:{emailRedirectTo:location.origin+location.pathname}});m.textContent=error?'Non riesco a reinviare ora. Riprova tra poco o apri un ticket.':'Email reinviata.'}},'Reinvia l’email'),
+      h('button',{class:'linkbtn',onclick:()=>{S.acc={state:'none'};accountView()}},'Ho sbagliato email'),m),footer());
+  }
+  const em=h('input',{class:'txt',type:'email',autocomplete:'email',placeholder:'La tua email','aria-label':'Email'});
+  const p1=pwField('Scegli una password (almeno 8 caratteri)'),p2=pwField('Ripeti la password');
+  const err=h('p',{class:'err',role:'alert'});
+  const btn=h('button',{class:'primary',onclick:async()=>{
+    err.textContent='';
+    const e=em.value.trim().toLowerCase();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)){err.textContent='Controlla l’email: non sembra corretta.';return}
+    if(p1.value.length<8){err.textContent='La password deve avere almeno 8 caratteri.';return}
+    if(p1.value!==p2.value){err.textContent='Le due password non coincidono.';return}
+    btn.disabled=true;
+    const r=await sb.rpc('student_prepare_account',{p_code:S.code,p_email:e});
+    if(r.error){err.textContent='Non posso usare questa email. Provane un’altra o apri un ticket.';btn.disabled=false;return}
+    const {error}=await sb.auth.signUp({email:e,password:p1.value,options:{emailRedirectTo:location.origin+location.pathname}});
+    if(error){err.textContent=/rate|limit/i.test(error.message)?'Troppe richieste in questo momento. Riprova tra qualche minuto o apri un ticket.':'Registrazione non riuscita: '+error.message;btn.disabled=false;return}
+    S.acc={state:'pending',email:e};accountView();
+  }},'Crea accesso');
+  mount(topbar('Crea il tuo accesso',back),
+    h('p',{class:'sub'},'Usa un’email che controlli. Ti invieremo un link: dopo averlo cliccato potrai entrare con email e password da qualsiasi dispositivo.'),
+    h('div',{class:'card'},em,p1,p2,btn,err),footer());
+}
+function emailLoginView(msg){
+  const em=h('input',{class:'txt',type:'email',autocomplete:'email',placeholder:'Email','aria-label':'Email'});
+  const pw=h('input',{class:'txt',type:'password',autocomplete:'current-password',placeholder:'Password','aria-label':'Password'});
+  const err=h('p',{class:'err',role:'alert'},msg||'');
+  const go=async()=>{
+    err.textContent='';btn.disabled=true;
+    const {error}=await sb.auth.signInWithPassword({email:em.value.trim().toLowerCase(),password:pw.value});
+    if(error){
+      err.textContent=/confirm/i.test(error.message)?'Devi prima confermare l’email: clicca il link che ti abbiamo inviato (controlla lo spam). Se hai problemi, apri un ticket di assistenza.':'Email o password non corrette.';
+      btn.disabled=false;return}
+    const r=await sb.rpc('my_student_code');
+    if(!r.data){err.textContent='Questo account non è collegato a un alunno.';await sb.auth.signOut();btn.disabled=false;return}
+    studentLoad(r.data);
+  };
+  const btn=h('button',{class:'primary',onclick:go},'Entra');
+  pw.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
+  const fg=h('button',{class:'linkbtn small',onclick:async()=>{
+    const e=em.value.trim().toLowerCase();if(!e){err.textContent='Scrivi prima la tua email.';return}
+    await sb.auth.resetPasswordForEmail(e,{redirectTo:location.origin+location.pathname});
+    err.className='ok';err.textContent='Se l’email è registrata, ti abbiamo inviato il link per scegliere una nuova password.';
+  }},'Password dimenticata?');
+  mount(h('img',{class:'logo-big',src:'icons/logo.png',alt:'Esmet Academy'}),h('h1',null,'Entra'),
+    h('div',{class:'card'},em,pw,btn,fg,err),
+    h('p',{class:'sub small'},h('button',{class:'linkbtn',onclick:()=>loginView()},'Torna al codice')),footer());
+}
+function newPasswordView(){
+  const p1=pwField('Nuova password (almeno 8 caratteri)'),p2=pwField('Ripeti la password');
+  const err=h('p',{class:'err',role:'alert'});
+  const btn=h('button',{class:'primary',onclick:async()=>{
+    if(p1.value.length<8){err.textContent='Almeno 8 caratteri.';return}
+    if(p1.value!==p2.value){err.textContent='Le due password non coincidono.';return}
+    const {error}=await sb.auth.updateUser({password:p1.value});
+    if(error){err.textContent='Non riesco a salvare: '+error.message;return}
+    start();
+  }},'Salva password');
+  mount(h('h1',null,'Nuova password'),h('div',{class:'card'},p1,p2,btn,err),footer());
 }
 
 /* ---------- student: consent ---------- */
@@ -166,9 +256,9 @@ function drawer(){
     h('button',{class:'dr-item',onclick:()=>{close();homeView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📚'),'Lezioni'),
     h('button',{class:'dr-item',onclick:()=>{close();registroView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📋'),'Registro'),
     h('button',{class:'dr-item',onclick:()=>{close();lavagneView()}},h('span',{class:'dr-em','aria-hidden':'true'},'🖼️'),'Lavagne'),
-    item('user','Profilo (presto)',()=>{}),
+    item('user','Il mio accesso',()=>accountView()),
     (me.courses.length>1)?item('book','Cambia corso',()=>courseSwitch()):null,
-    item('out','Esci',()=>{LS.del('esmet_code');LS.del('esmet_cache');S.code=null;S.me=null;loginView()}),
+    item('out','Esci',()=>{sb.auth.signOut().catch(()=>{});LS.del('esmet_code');LS.del('esmet_cache');S.code=null;S.me=null;loginView()}),
     h('p',{class:'dr-ver'},'Ver '+CFG.version));
   const ov=h('div',{class:'dr-ov',onclick:e=>{if(e.target===ov)close()}},panel);
   document.body.append(ov);
@@ -218,6 +308,7 @@ function homeView(offline){
   mount(tabHeader(),
     offline?h('p',{class:'sub small'},'Sei offline: vedi l’ultima versione scaricata.'):null,
     join,joinMsg,
+    accountBanner(),
     h('h3',{class:'sect'},'Lezioni'),
     rows.length?h('div',{class:'rows'},rows):h('p',{class:'sub'},'Nessuna lezione pubblicata.'),
     tabs('lez'),footer());
