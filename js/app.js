@@ -110,10 +110,10 @@ async function studentLoad(code,fromLogin,errEl){
     S.acc=null;
     try{const a=await sb.rpc('student_account_status',{p_code:code});S.acc=a.data||null}catch(e){}
     if(!data.consent_at)return consentView();
-    homeView();
+    calView();
   }catch(e){
     const cache=LS.get('esmet_cache',null);
-    if(cache&&S.code===code){S.me=cache;if(cache.consent_at)return homeView(true)}
+    if(cache&&S.code===code){S.me=cache;if(cache.consent_at)return calView(null,true)}
     if(errEl)errEl.textContent='Connessione assente o servizio non raggiungibile. Riprova.';
     else loginView('Connessione assente. Riprova.');
   }
@@ -129,9 +129,9 @@ function accountBanner(){
 }
 function pwField(ph){return h('input',{class:'txt',type:'password',autocomplete:'new-password',placeholder:ph,'aria-label':ph})}
 function accountView(){
-  const back=()=>homeView();
+  const back=()=>calView();
   const a=S.acc||{state:'none'};
-  if(a.state==='ok')return mount(topbar('Il mio accesso',back),h('div',{class:'card'},h('p',null,'Accesso con email attivo ✅'),h('p',{class:'sub small'},a.email||''),h('p',{class:'sub small'},'Per cambiare email o password apri un ticket di assistenza.')),footer());
+  if(a.state==='ok')return mount(topbar('Il mio accesso',back),h('div',{class:'card'},h('p',null,'Accesso con email attivo ✅'),h('p',{class:'sub small'},a.email||''),h('p',{class:'sub small'},'Per cambiare email o password apri un ticket di assistenza.'),h('button',{class:'linkbtn',onclick:()=>ticketView('Accesso e password')},'Apri un ticket')),footer());
   if(a.state==='pending'){
     const m=h('p',{role:'status',class:'sub small'});
     return mount(topbar('Il mio accesso',back),h('div',{class:'card'},
@@ -153,7 +153,7 @@ function accountView(){
     const r=await sb.rpc('student_prepare_account',{p_code:S.code,p_email:e});
     if(r.error){err.textContent='Non posso usare questa email. Provane un’altra o apri un ticket.';btn.disabled=false;return}
     const {error}=await sb.auth.signUp({email:e,password:p1.value,options:{emailRedirectTo:location.origin+location.pathname}});
-    if(error){err.textContent=/rate|limit/i.test(error.message)?'Troppe richieste in questo momento. Riprova tra qualche minuto o apri un ticket.':'Registrazione non riuscita: '+error.message;btn.disabled=false;return}
+    if(error){err.textContent=/rate|limit/i.test(error.message)?'Troppe richieste in questo momento. Riprova tra qualche minuto o scrivi all’assistenza dal menu.':'Registrazione non riuscita: '+error.message;btn.disabled=false;return}
     S.acc={state:'pending',email:e};accountView();
   }},'Crea accesso');
   mount(topbar('Crea il tuo accesso',back),
@@ -223,7 +223,7 @@ function consentView(){
 }
 
 /* ---------- student: shell ---------- */
-const ICO={
+const ICO={key:'M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4',
   menu:'M4 7h16M4 12h16M4 17h16',
   chev:'M9 6l6 6-6 6',
   back:'M15 6l-6 6 6 6',
@@ -253,10 +253,13 @@ function drawer(){
   const item=(icon,label,fn)=>h('button',{class:'dr-item',onclick:()=>{close();fn()}},ico(icon),label);
   const panel=h('div',{class:'dr-panel',role:'dialog','aria-label':'Menu'},
     h('p',{class:'dr-title'},'Esmet Academy'),
+    h('button',{class:'dr-item',onclick:()=>{close();calView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📅'),'Calendario'),
     h('button',{class:'dr-item',onclick:()=>{close();homeView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📚'),'Lezioni'),
     h('button',{class:'dr-item',onclick:()=>{close();registroView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📋'),'Registro'),
     h('button',{class:'dr-item',onclick:()=>{close();lavagneView()}},h('span',{class:'dr-em','aria-hidden':'true'},'🖼️'),'Lavagne'),
-    item('user','Il mio accesso',()=>accountView()),
+    item('user','Il mio profilo',()=>profileView()),
+    item('key','Il mio accesso',()=>accountView()),
+    h('button',{class:'dr-item',onclick:()=>{close();ticketView()}},h('span',{class:'dr-em','aria-hidden':'true'},'🛟'),'Assistenza'),
     (me.courses.length>1)?item('book','Cambia corso',()=>courseSwitch()):null,
     item('out','Esci',()=>{sb.auth.signOut().catch(()=>{});LS.del('esmet_code');LS.del('esmet_cache');S.code=null;S.me=null;loginView()}),
     h('p',{class:'dr-ver'},'Ver '+CFG.version));
@@ -274,7 +277,7 @@ function topbar(title,back){
 }
 function tabs(active){
   const t=(id,label,em,fn)=>h('button',{class:'tab'+(active===id?' on':''),onclick:fn,'aria-current':active===id?'page':null},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
-  return h('nav',{class:'tabbar'},t('lez','Lezioni','📚',()=>homeView()),t('reg','Registro','📋',()=>registroView()),t('lav','Lavagne','🖼️',()=>lavagneView()));
+  return h('nav',{class:'tabbar'},t('cal','Calendario','📅',()=>calView()),t('lez','Lezioni','📚',()=>homeView()),t('reg','Registro','📋',()=>registroView()),t('lav','Lavagne','🖼️',()=>lavagneView()));
 }
 function tabHeader(){
   const c=curCourse();
@@ -284,11 +287,8 @@ function tabHeader(){
     h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:drawer},ico('menu')));
 }
 
-/* ---------- student: home (lezioni) ---------- */
-function homeView(offline){
-  const me=S.me;const c=curCourse();
-  if(!c){mount(tabHeader(),h('p',{class:'sub'},'Non hai ancora corsi assegnati.'),footer());return}
-  const lessons=(c.lessons||[]).slice().sort((a,b)=>b.number-a.number);
+
+function joinBlock(c){
   const joinMsg=h('p',{class:'sub small',role:'status'});
   const join=h('button',{class:'banner',onclick:async()=>{
     joinMsg.textContent='Un attimo…';
@@ -298,6 +298,15 @@ function homeView(offline){
     joinMsg.textContent='Presenza registrata. Buona lezione!';
     if(win)win.location.href=data;else location.href=data;
   }},h('span',null,'Accedi alla lezione'),ico('video'));
+  return [join,joinMsg];
+}
+
+/* ---------- student: home (lezioni) ---------- */
+function homeView(offline){
+  const me=S.me;const c=curCourse();
+  if(!c){mount(tabHeader(),h('p',{class:'sub'},'Non hai ancora corsi assegnati.'),footer());return}
+  const lessons=(c.lessons||[]).slice().sort((a,b)=>b.number-a.number);
+  const [join,joinMsg]=joinBlock(c);
   const rows=lessons.map(l=>{
     const ex=(l.content&&l.content.exercises)||[];
     const done=Object.keys(LS.get('esmet_res_'+l.id,{})).length;
@@ -312,6 +321,119 @@ function homeView(offline){
     h('h3',{class:'sect'},'Lezioni'),
     rows.length?h('div',{class:'rows'},rows):h('p',{class:'sub'},'Nessuna lezione pubblicata.'),
     tabs('lez'),footer());
+}
+
+
+/* ---------- student: calendario settimanale ---------- */
+function mondayOf(d){const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x}
+const isoD=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+async function calView(weekStart,offline){
+  const mon=weekStart?mondayOf(weekStart):mondayOf(new Date());
+  const sun=new Date(mon);sun.setDate(sun.getDate()+6);
+  const label=mon.getDate()+' '+MESI[mon.getMonth()].slice(0,3).toLowerCase()+' – '+sun.getDate()+' '+MESI[sun.getMonth()].slice(0,3).toLowerCase()+' '+sun.getFullYear();
+  const shift=n=>{const d=new Date(mon);d.setDate(d.getDate()+7*n);calView(d)};
+  const nav=h('div',{class:'row'},
+    h('button',{class:'icon-btn','aria-label':'Settimana precedente',onclick:()=>shift(-1)},ico('back')),
+    h('strong',{class:'weeklab'},label),
+    h('button',{class:'icon-btn','aria-label':'Settimana successiva',onclick:()=>shift(1),style:'transform:scaleX(-1)'},ico('back')),
+    h('button',{class:'linkbtn small',onclick:()=>calView()},'Oggi'));
+  mount(tabHeader(),nav,h('p',{class:'sub'},'Caricamento…'),tabs('cal'));
+  let list=[];let off=!!offline;
+  try{const {data,error}=await sb.rpc('student_calendar',{p_code:S.code,p_from:isoD(mon),p_to:isoD(sun)});if(error)throw error;list=data||[];LS.set('esmet_cal_'+isoD(mon),list)}
+  catch(e){list=LS.get('esmet_cal_'+isoD(mon),[]);off=true}
+  const c0=curCourse();const [jb,jm]=c0?joinBlock(c0):[null,null];
+  const todayK=isoD(new Date());
+  const days=[];for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(d.getDate()+i);days.push(d)}
+  const blocks=days.map(d=>{
+    const k=isoD(d);const L=list.filter(x=>x.date===k);if(!L.length)return null;
+    return h('div',null,
+      h('div',{class:'datepill'+(k===todayK?' today':'')},GIORNI[d.getDay()]+', '+d.getDate()+' '+MESI[d.getMonth()]),
+      L.map(x=>lessonCard(x)));
+  });
+  mount(tabHeader(),
+    off?h('p',{class:'sub small'},'Sei offline: vedi l’ultimo calendario scaricato.'):null,
+    jb,jm,
+    nav,
+    accountBanner(),
+    blocks.some(Boolean)?blocks:h('p',{class:'sub'},'Nessuna lezione in programma questa settimana.'),
+    tabs('cal'),footer());
+}
+function lessonCard(x){
+  const msg=h('p',{class:'sub small',role:'status'});
+  const body=h('div',{class:'lc-actions',hidden:'hidden'});
+  const past=x.date<isoD(new Date());
+  const st=x.attendance==='present'?['Presente','g']:x.attendance==='absent_notified'?['Assenza comunicata','n']:x.attendance==='absent'?['Assente','b']:
+    x.response==='move_request'?[x.response_status==='accepted'?'Spostamento accettato':x.response_status==='rejected'?'Spostamento non accettato':'Spostamento richiesto','n']:
+    x.response==='confirm'?['Confermata','g']:null;
+  const send=async(resp,note)=>{
+    const {error}=await sb.rpc('student_respond',{p_code:S.code,p_session:x.id,p_response:resp,p_note:note||null});
+    if(error){msg.className='err';msg.textContent='Non sono riuscito a salvare. Riprova.';return}
+    calView(new Date(x.date+'T12:00:00'));
+  };
+  if(!past){
+    body.append(...[
+      h('button',{class:'primary',onclick:()=>send('confirm')},'Confermo'),
+      h('button',{class:'secondary',onclick:()=>absenceView({course_id:x.course_id,date:x.date})},'Sarò assente'),
+      x.individual?h('button',{class:'secondary',onclick:()=>{const n=prompt('Quando preferiresti spostarla? (giorno e ora)','');if(n===null)return;send('move_request',n)}},'Chiedi di spostare'):null].filter(Boolean));
+  }
+  const head=h('button',{class:'lc-head',onclick:()=>{if(!past)body.hidden=!body.hidden},'aria-expanded':'false'},
+    h('span',{class:'lc-time'},x.start+(x.end?'–'+x.end:'')),
+    h('span',{class:'lc-main'},h('strong',null,x.course),x.place?h('span',{class:'sub small'},x.place+(x.section==='morning'?' · mattina':x.section==='evening'?' · sera':'')):(x.section==='morning'?h('span',{class:'sub small'},'mattina'):x.section==='evening'?h('span',{class:'sub small'},'sera'):null)),
+    st?h('span',{class:'pill '+st[1]},st[0]):null);
+  return h('div',{class:'card lc'},head,body,msg);
+}
+
+/* ---------- profilo ---------- */
+async function profileView(){
+  const back=()=>calView();
+  mount(topbar('Il mio profilo',back),h('p',{class:'sub'},'Caricamento…'));
+  const {data}=await sb.rpc('student_get_profile',{p_code:S.code});
+  const p=data||{};
+  const ph=h('input',{class:'txt',type:'tel',autocomplete:'tel',value:p.phone||'',placeholder:'Telefono'});
+  const ci=h('input',{class:'txt',type:'text',autocomplete:'address-level2',value:p.city||'',placeholder:'Città'});
+  const bd=h('input',{class:'txt',type:'date',value:p.birth_date||''});
+  const msg=h('p',{role:'status'});
+  const save=h('button',{class:'primary',onclick:async()=>{
+    save.disabled=true;
+    const {error}=await sb.rpc('student_save_profile',{p_code:S.code,p_phone:ph.value,p_city:ci.value,p_birth:bd.value||null});
+    save.disabled=false;
+    msg.className=error?'err':'ok';msg.textContent=error?'Non sono riuscito a salvare. Riprova.':'Dati salvati.';
+  }},'Salva');
+  mount(topbar('Il mio profilo',back),
+    h('div',{class:'card'},
+      h('p',null,h('strong',null,S.me.name)),
+      (S.acc&&S.acc.email)?h('p',{class:'sub small'},'Email di accesso: '+S.acc.email):null,
+      h('label',null,'Telefono',ph),h('label',null,'Città',ci),h('label',null,'Data di nascita',bd),
+      save,msg,
+      h('p',{class:'sub small'},'Per correggere il nome o cambiare l’email scrivi all’assistenza.'),
+      h('button',{class:'linkbtn small',onclick:()=>ticketView('Dati personali')},'Apri un ticket')),
+    footer());
+}
+
+/* ---------- assistenza (ticket) ---------- */
+const SUPPORT='esmet.app.supporto@gmail.com';
+function ticketView(cat){
+  const back=()=>calView();
+  const cats=['Accesso e password','Esercizi','Calendario e lezioni','Presenze e registro','Lavagne','Dati personali','Altro'];
+  const sel=h('select',{class:'txt sel','aria-label':'Argomento'},cats.map(c=>h('option',{value:c,selected:c===cat},c)));
+  const txt=h('textarea',{class:'txt',rows:'6',maxlength:'1500',placeholder:'Descrivi il problema: cosa stavi facendo e cosa è successo?'});
+  const msg=h('p',{role:'status'});
+  const build=()=>{
+    const course=(curCourse()||{}).name||'';
+    const body='Argomento: '+sel.value+'\n\n'+txt.value.trim()+'\n\n---\nAlunno: '+S.me.name+'\nCorso: '+course+'\nVersione app: '+CFG.version+'\nDispositivo: '+navigator.userAgent;
+    return {subject:'[Assistenza Esmet] '+sel.value+' – '+S.me.name,body};
+  };
+  const mail=h('button',{class:'primary',onclick:()=>{
+    if(txt.value.trim().length<5){msg.className='err';msg.textContent='Scrivi qualche riga sul problema.';return}
+    const t=build();location.href='mailto:'+SUPPORT+'?subject='+encodeURIComponent(t.subject)+'&body='+encodeURIComponent(t.body);
+    msg.className='ok';msg.textContent='Si apre la tua app di posta con il messaggio pronto: premi Invia.';
+  }},'Prepara il messaggio');
+  const copy=h('button',{class:'linkbtn small',onclick:async()=>{
+    const t=build();try{await navigator.clipboard.writeText('A: '+SUPPORT+'\nOggetto: '+t.subject+'\n\n'+t.body);msg.className='ok';msg.textContent='Testo copiato: incollalo in un’email a '+SUPPORT}catch(e){msg.className='err';msg.textContent='Scrivi a '+SUPPORT}
+  }},'Non si apre la posta? Copia il testo');
+  mount(topbar('Assistenza',back),
+    h('p',{class:'sub'},'Scrivici: ti rispondiamo il prima possibile.'),
+    h('div',{class:'card'},h('label',null,'Argomento',sel),h('label',null,'Messaggio',txt),mail,copy,msg),footer());
 }
 
 /* ---------- student: registro ---------- */
@@ -360,11 +482,11 @@ async function registroView(filter){
     h('p',{class:'sub small',style:'text-align:center'},'Non puoi venire a una lezione? ',h('button',{class:'linkbtn small',onclick:()=>absenceView()},'Comunica assenza')),
     tabs('reg'),footer());
 }
-function absenceView(){
-  const c=curCourse();
+function absenceView(pre){
+  const c=(pre&&S.me.courses.find(x=>x.id===pre.course_id))||curCourse();
   const today=new Date().toISOString().slice(0,10);
   const motivo=h('select',{class:'txt sel'},['Seleziona un motivo','Malattia','Lavoro','Impegno familiare','Altro'].map((t,i)=>h('option',{value:i?t:''},t)));
-  const d=h('input',{type:'date',class:'txt',value:today,min:today});
+  const d=h('input',{type:'date',class:'txt',value:(pre&&pre.date)||today,min:today});
   const nota=h('textarea',{class:'txt',rows:'3',maxlength:'400'});
   const msg=h('p',{role:'status'});
   const send=h('button',{class:'primary',onclick:async()=>{
@@ -374,7 +496,7 @@ function absenceView(){
     if(error){msg.className='err';msg.textContent='Non sono riuscito a inviare. Controlla la data e riprova.';send.disabled=false}
     else{msg.className='ok';msg.textContent='Assenza comunicata. Grazie!'}
   }},'Salva');
-  mount(topbar('Comunica assenza',()=>registroView()),
+  mount(topbar('Comunica assenza',()=>pre?calView():registroView()),
     h('div',{class:'card'},h('p',{class:'sub'},c.name),
       h('label',null,'Motivo dell’assenza',motivo),h('label',null,'Giorno della lezione',d),h('label',null,'Nota (facoltativa)',nota),send,msg),footer());
 }

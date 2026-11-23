@@ -127,3 +127,8 @@ label.chk{flex-direction:row;color:var(--ink)}
 .btnlink{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
 
 .notice{background:#fff7e0;border:1px solid #f0d58a;color:#5c4400;border-radius:12px;padding:10px 12px;text-align:left;font:inherit;font-size:.85rem;cursor:pointer;width:100%}
+
+.lc{padding:0;gap:0;margin-top:6px}.lc-head{display:flex;gap:10px;align-items:center;background:none;border:0;padding:12px 14px;text-align:left;font:inherit;cursor:pointer;width:100%}
+.lc-time{font-weight:700;min-width:92px;font-size:.9rem}.lc-main{display:flex;flex-direction:column;flex:1;min-width:0}
+.lc-actions{display:flex;flex-wrap:wrap;gap:8px;padding:0 14px 12px}.lc-actions[hidden]{display:none}.lc>p{padding:0 14px}
+.weeklab{flex:1;text-align:center;font-size:.9rem}.datepill.today{background:var(--accent,#2b4fb8);color:#fff}
