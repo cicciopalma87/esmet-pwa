@@ -951,23 +951,34 @@ async function routeStaff(){
 }
 function aDrawer(){
   const close=()=>ov.remove();
-  const it=(em,l,fn)=>h('button',{class:'dr-item',onclick:()=>{close();fn()}},h('span',{class:'dr-em','aria-hidden':'true'},em),l);
+  const it=(em,l,fn,sub)=>h('button',{class:'dr-item'+(sub?' dr-sub':''),onclick:()=>{close();fn()}},h('span',{class:'dr-em','aria-hidden':'true'},em),l);
   const panel=h('div',{class:'dr-panel',role:'dialog','aria-label':'Menu'},
     h('p',{class:'dr-title'},'Esmet Academy · amministrazione'),
-    it('🧑‍🎓','Alunni',()=>adminHome('alunni')),it('🏫','Classi',()=>adminHome('classi')),it('👩‍🏫','Docenti',()=>adminHome('docenti')),
-    it('📅','Calendario lezioni',()=>teacherCal()),
-    it('🚪','Esci',async()=>{await sb.auth.signOut();teacherLogin()}),
+    h('p',{class:'dr-group'},'Anagrafiche'),
+    it('🧑‍🎓','Alunni',()=>adminHome('alunni'),1),it('🏫','Classi',()=>adminHome('classi'),1),it('👩‍🏫','Docenti',()=>adminHome('docenti'),1),
+    h('p',{class:'dr-group'},'Calendario'),it('📅','Calendario e presenze',()=>adminMonth(),1),
+    h('p',{class:'dr-group'},'Contabilità'),it('💶','Entrate',()=>adminConto('entrate'),1),it('🧾','Uscite',()=>adminConto('uscite'),1),
+    h('hr'),it('🚪','Esci',async()=>{await sb.auth.signOut();teacherLogin()}),
     h('p',{class:'dr-ver'},'Ver '+CFG.version));
   const ov=h('div',{class:'dr-ov',onclick:e=>{if(e.target===ov)close()}},panel);document.body.append(ov);
 }
 function aTabs(active){
-  const t=(id,label,em)=>h('button',{class:'tab'+(active===id?' on':''),onclick:()=>adminHome(id)},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
-  return h('nav',{class:'tabbar'},t('alunni','Alunni','🧑‍🎓'),t('classi','Classi','🏫'),t('docenti','Docenti','👩‍🏫'),h('button',{class:'tab'+(active==='cal'?' on':''),onclick:()=>teacherCal()},h('span',{class:'em','aria-hidden':'true'},'📅'),h('span',null,'Calendario')));
+  const an=['alunni','classi','docenti'].includes(active)?'anag':active;
+  const t=(id,label,em,fn)=>h('button',{class:'tab'+(an===id?' on':''),onclick:fn},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
+  return h('nav',{class:'tabbar'},t('anag','Anagrafiche','🗂️',()=>adminHome('alunni')),t('cal','Calendario','📅',()=>adminMonth()),t('conto','Contabilità','💶',()=>adminConto('entrate')));
 }
 function aHeader(){
   return h('div',{class:'thead2'},h('div',{class:'thead-top'},
     h('img',{class:'logo-sm',src:'icons/logo.png',alt:'Esmet Academy'}),
     h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:aDrawer},ico('menu'))));
+}
+function subNav(items,active){
+  return h('div',{class:'subnav'},items.map(([id,l,fn])=>h('button',{class:'seg'+(id===active?' on':''),onclick:fn},l)));
+}
+function adminConto(sub){
+  const info=sub==='entrate'?['Entrate','Qui registrerai gli abbonamenti pagati dagli alunni (importo, data, periodo coperto) e vedrai chi è in ritardo per il corso successivo, con un avviso da inviare.']:['Uscite','Qui registrerai i pagamenti in uscita e calcolerai il compenso di ogni docente in base ai corsi svolti (anche più corsi in contemporanea).'];
+  mount(aHeader(),h('h2',{class:'sect'},'Contabilità'),subNav([['entrate','Entrate',()=>adminConto('entrate')],['uscite','Uscite',()=>adminConto('uscite')]],sub),
+    h('div',{class:'card'},h('h3',null,info[0]),h('p',{class:'sub'},info[1]),h('p',{class:'sub small'},'In preparazione: sezione non ancora attiva.')),aTabs('conto'),footer());
 }
 function selEl(opts,val,label){
   const s=h('select',{class:'txt','aria-label':label||''},...opts.map(o=>h('option',{value:o[0]},o[1])));
@@ -983,17 +994,18 @@ async function adminHome(tab){
   mount(aHeader(),h('p',{class:'sub'},'Caricamento…'),aTabs(tab));
   try{await adminLoad()}catch(e){mount(aHeader(),h('p',{class:'err'},'Non riesco a caricare i dati: '+(e.message||e)),aTabs(tab));return}
   const body=tab==='classi'?adminClassi():tab==='docenti'?adminDocenti():adminAlunni();
-  mount(aHeader(),body,aTabs(tab));
+  mount(aHeader(),subNav([['alunni','Alunni',()=>adminHome('alunni')],['classi','Classi',()=>adminHome('classi')],['docenti','Docenti',()=>adminHome('docenti')]],tab),body,aTabs(tab));
 }
-const courseName=id=>{const c=A.ov.courses.find(x=>x.id===id);return c?shortName(c):'?'};
+const courseName=(id,noT)=>{const c=A.ov.courses.find(x=>x.id===id);return c?shortName(c,noT):'?'};
 const KL={group:'Gruppo',individual:'Individuale',conversation:'Conversazione'};
 const LEVELS=['A1','A2','B1','B2','C1','C2'];
-function shortName(c){
+function shortName(c,noT){
   const lg=c.language&&c.language!=='Tedesco'?c.language+' · ':'';
-  if(c.kind==='individual'){const m=/individuale\s+(.+)$/i.exec(c.name);return lg+'Ind. '+(m?m[1]:c.name)}
-  return lg+c.level+(c.kind==='group'?' gruppo':' conv.');
+  const t=(!noT&&c.teacher)?' - '+c.teacher:'';
+  if(c.kind==='individual'){const m=/individuale\s+(.+)$/i.exec(c.name);return lg+'Ind. '+(m?m[1]:c.name)+t}
+  return lg+c.level+(c.kind==='group'?' Gruppo':' Conv.')+t;
 }
-const fromOpts=ids=>ids.map(i=>{const c=A.ov.courses.find(x=>x.id===i);return [i,c?shortName(c)+(c.teacher?' · '+c.teacher.split(' ')[0]:''):'?']});
+const fromOpts=ids=>ids.map(i=>{const c=A.ov.courses.find(x=>x.id===i);return [i,c?shortName(c):'?']});
 function lab(t){return h('p',{class:'sub small fld'},t)}
 /* selezione a cascata: Lingua → Docente → Tipo → Livello */
 function classPicker(o){
@@ -1052,13 +1064,15 @@ async function showCode(r){
 }
 function adminAlunni(){
   const list=h('div',{class:'rows'});const bar=h('div',{class:'bar-row'});
+  const cf=selEl([['','Tutte le classi'],['none','Senza classe'],...A.ov.courses.map(c=>[c.id,shortName(c)])],A.cfs||'','Filtra per classe');
+  cf.addEventListener('change',()=>{A.cfs=cf.value;draw()});
   const draw=()=>{
     const q=norm(A.q);
-    list.replaceChildren(...A.ov.students.filter(s=>!q||norm(s.name).includes(q)||norm(s.code).includes(q)).map(s=>{
+    list.replaceChildren(...A.ov.students.filter(s=>(!q||norm(s.name).includes(q)||norm(s.code).includes(q))&&(!A.cfs||(A.cfs==='none'?!s.course_ids.length:s.course_ids.includes(A.cfs)))).map(s=>{
       const cb=h('input',{type:'checkbox','aria-label':'Seleziona '+s.name});cb.checked=A.sel.has(s.id);
       cb.addEventListener('change',()=>{cb.checked?A.sel.add(s.id):A.sel.delete(s.id);drawBar()});
       return h('label',{class:'chk-row'},cb,h('span',{style:'flex:1'},h('strong',null,s.name),' ',h('span',{class:'sub small'},s.code+(s.has_account?' · account email':'')),
-        h('br'),s.course_ids.length?s.course_ids.map(i=>h('span',{class:'chip'},courseName(i))):h('span',{class:'sub small'},'nessuna classe')));
+        h('br'),s.course_ids.length?s.course_ids.map(i=>h('span',{class:'ctag'},courseName(i))):h('span',{class:'sub small'},'nessuna classe')));
     }));
     if(!list.children.length)list.append(h('p',{class:'sub'},'Nessun alunno.'));
   };
@@ -1072,7 +1086,7 @@ function adminAlunni(){
   q.addEventListener('input',()=>{A.q=q.value;draw()});
   draw();drawBar();
   return h('div',null,h('h2',{class:'sect'},'Alunni'),
-    h('button',{class:'primary',onclick:newStudent},'+ Nuovo alunno'),q,bar,list);
+    h('button',{class:'primary',onclick:newStudent},'+ Nuovo alunno'),q,cf,bar,list);
 }
 async function newStudent(){
   const nm=h('input',{class:'txt',type:'text',placeholder:'Nome e cognome'});
@@ -1122,14 +1136,24 @@ async function assignDlg(mode){
   A.sel.clear();adminHome('alunni');
 }
 function adminClassi(){
-  const cards=A.ov.courses.map(c=>{
-    const stu=A.ov.students.filter(s=>s.course_ids.includes(c.id));
-    return h('div',{class:'card'},h('h3',null,shortName(c)),
-      h('p',{class:'sub small'},KL[c.kind]+' · '+c.level+' · '+c.language+' · docente: '+(c.teacher||'non assegnato')),
-      h('p',{class:'sub small'},stu.length?stu.length+' alunni: '+stu.map(s=>s.name).join(', '):'Nessun alunno'),
-      h('button',{class:'secondary',onclick:()=>changeTeacher(c)},'Cambia docente'));
-  });
-  return h('div',null,h('h2',{class:'sect'},'Classi'),h('button',{class:'primary',onclick:newClass},'+ Nuova classe'),...cards);
+  const F=A.cf||(A.cf={kind:'',teacher:''});
+  const kd=selEl([['','Tutti i tipi'],...Object.entries(KL)],F.kind,'Tipo');
+  const dc=selEl([['','Tutti i docenti'],...A.staff.staff.filter(p=>p.role==='teacher').map(p=>[p.id,p.name])],F.teacher,'Docente');
+  const box=h('div');
+  const draw=()=>{
+    F.kind=kd.value;F.teacher=dc.value;
+    const L=A.ov.courses.filter(c=>(!F.kind||c.kind===F.kind)&&(!F.teacher||c.teacher_id===F.teacher));
+    box.replaceChildren(...(L.length?L:[null]).map(c=>{
+      if(!c)return h('p',{class:'sub'},'Nessuna classe con questi filtri.');
+      const stu=A.ov.students.filter(s=>s.course_ids.includes(c.id));
+      return h('div',{class:'card'},h('h3',null,shortName(c)),
+        h('p',{class:'sub small'},KL[c.kind]+' · '+c.level+' · '+c.language+(c.teacher?'':' · docente non assegnato')),
+        h('p',{class:'sub small'},stu.length?stu.length+' alunni: '+stu.map(s=>s.name).join(', '):'Nessun alunno'),
+        h('button',{class:'secondary',onclick:()=>changeTeacher(c)},'Cambia docente'));
+    }));
+  };
+  kd.addEventListener('change',draw);dc.addEventListener('change',draw);draw();
+  return h('div',null,h('h2',{class:'sect'},'Classi'),h('button',{class:'primary',onclick:newClass},'+ Nuova classe'),lab('Tipo di corso'),kd,lab('Docente'),dc,box);
 }
 const teacherOpts=()=>[['','— nessun docente —'],...A.staff.staff.filter(p=>p.role==='teacher').map(p=>[p.id,p.name])];
 async function changeTeacher(c){
@@ -1150,7 +1174,7 @@ async function newClass(){
 function adminDocenti(){
   const st=A.staff.staff.filter(p=>p.role==='teacher').map(p=>h('div',{class:'card'},h('h3',null,p.name),
     h('p',{class:'sub small'},(p.email||'')+' · '+(p.languages||[]).join(', ')),
-    h('p',{class:'sub small'},...(p.courses.length?p.courses.map(c=>h('span',{class:'chip'},courseName(c.id))):['Nessuna classe assegnata'])),
+    h('p',{class:'sub small'},...(p.courses.length?p.courses.map(c=>h('span',{class:'ctag'},courseName(c.id,true))):['Nessuna classe assegnata'])),
     p.blocked?h('p',{class:'err'},'Accesso bloccato'):null,
     p.role==='teacher'?h('div',{class:'row'},h('button',{class:'secondary',onclick:()=>inviteDlg(p)},'Modifica lingue e classi'),
       h('button',{class:'secondary',onclick:async()=>{
@@ -1176,7 +1200,7 @@ async function inviteDlg(p){
   const nm=h('input',{class:'txt',type:'text',placeholder:'Nome e cognome',value:p?p.name:''});
   const lgs=LANGS.map(l=>{const c=h('input',{type:'checkbox'});c.checked=p?(p.languages||[]).includes(l):l==='Tedesco';return [l,c]});
   const mine=p?p.courses.map(c=>c.id):[];
-  const crs=A.ov.courses.map(c=>{const c2=h('input',{type:'checkbox'});c2.checked=mine.includes(c.id);return [c.id,shortName(c)+(c.teacher&&!mine.includes(c.id)?' (ora: '+c.teacher.split(' ')[0]+')':''),c2]});
+  const crs=A.ov.courses.map(c=>{const c2=h('input',{type:'checkbox'});c2.checked=mine.includes(c.id);return [c.id,shortName(c,true)+(c.teacher&&!mine.includes(c.id)?' (ora: '+c.teacher+')':''),c2]});
   const err=h('p',{class:'err',role:'alert'});
   const v=await dlg(p?'Modifica docente':'Invita docente',[em,nm,h('p',{class:'sub small'},'Lingue insegnate:'),
     ...lgs.map(([l,c])=>h('label',{class:'chk-row'},c,l)),h('p',{class:'sub small'},'Classi assegnate:'),
@@ -1188,6 +1212,91 @@ async function inviteDlg(p){
   if(error)return say('Errore',error.message);
   if(!p)await inviteMsg(em.value.trim().toLowerCase(),nm.value);
   adminHome('docenti');
+}
+
+
+/* calendario amministratore: mese a quadrati → giorno → presenze */
+const WD=['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
+async function adminCalBase(){
+  if(!A.staff){const r=await sb.rpc('admin_staff_list');A.staff=r.data}
+  const ts=A.staff.staff.filter(p=>p.role==='teacher');
+  const pick=selEl([['','Tutti i docenti'],...ts.map(p=>[p.id,p.name])],A.calT||'','Docente');
+  return {ts,pick};
+}
+async function adminLoadRange(a,b){
+  const [cs,ss]=await Promise.all([
+    sb.from('courses').select('id,name,kind,level,language,teacher_id').eq('active',true),
+    sb.from('lesson_sessions').select('id,course_id,section,session_date,start_time,end_time,place,status,session_responses(student_id,response,status,note,students(display_name))').gte('session_date',isoD(a)).lte('session_date',isoD(b)).order('session_date').order('start_time')]);
+  if(cs.error||ss.error)throw (cs.error||ss.error);
+  const tn={};A.staff.staff.forEach(p=>tn[p.id]=p.name);
+  const cname={};cs.data.filter(c=>!A.calT||c.teacher_id===A.calT).forEach(c=>{c.tname=tn[c.teacher_id]||'';cname[c.id]=c});
+  return {cname,sessions:ss.data.filter(x=>cname[x.course_id]),courses:Object.values(cname)};
+}
+const tiny=c=>c.kind==='individual'?'Ind. '+((/individuale\s+(\S+)/i.exec(c.name)||[])[1]||''):c.level+(c.kind==='group'?' Gr':' Cv');
+async function adminMonth(m){
+  m=m?new Date(m):new Date();const first=new Date(m.getFullYear(),m.getMonth(),1,12),last=new Date(m.getFullYear(),m.getMonth()+1,0,12);
+  mount(aHeader(),h('p',{class:'sub'},'Caricamento…'),aTabs('cal'));
+  let base,data;
+  try{base=await adminCalBase();data=await adminLoadRange(first,last)}catch(e){return mount(aHeader(),h('p',{class:'err'},'Errore nel caricamento del calendario.'),aTabs('cal'))}
+  base.pick.addEventListener('change',()=>{A.calT=base.pick.value;adminMonth(first)});
+  const shift=n=>adminMonth(new Date(first.getFullYear(),first.getMonth()+n,1,12));
+  const nav=h('div',{class:'row'},
+    h('button',{class:'icon-btn','aria-label':'Mese precedente',onclick:()=>shift(-1)},ico('back')),
+    h('strong',{class:'weeklab'},MESI[first.getMonth()]+' '+first.getFullYear()),
+    h('button',{class:'icon-btn','aria-label':'Mese successivo',onclick:()=>shift(1),style:'transform:scaleX(-1)'},ico('back')),
+    h('button',{class:'linkbtn small',onclick:()=>adminMonth()},'Oggi'));
+  const todayK=isoD(new Date());
+  const cells=WD.map(w=>h('div',{class:'mwd'},w));
+  const lead=(first.getDay()+6)%7;for(let i=0;i<lead;i++)cells.push(h('div'));
+  for(let d=1;d<=last.getDate();d++){
+    const dt=new Date(first.getFullYear(),first.getMonth(),d,12),k=isoD(dt);
+    const L=data.sessions.filter(x=>x.session_date===k);
+    cells.push(h('button',{class:'mcell'+(k===todayK?' today':''),'aria-label':d+' '+MESI[dt.getMonth()]+', '+L.length+' lezioni',onclick:()=>adminDay(dt)},
+      h('span',{class:'mnum'},String(d)),
+      ...L.slice(0,3).map(x=>h('span',{class:'mline'},(x.start_time||'').slice(0,5)+' '+tiny(data.cname[x.course_id]))),
+      L.length>3?h('span',{class:'mmore'},'+'+(L.length-3)):null));
+  }
+  const exp=h('button',{class:'secondary',onclick:()=>exportMonth(first,last)},'⬇ Esporta mese con presenze (CSV)');
+  mount(aHeader(),h('h2',{class:'sect'},'Calendario'),base.pick,nav,h('div',{class:'mgrid'},cells),exp,aTabs('cal'),footer());
+}
+async function adminDay(d){
+  d=new Date(d);d.setHours(12,0,0,0);
+  mount(aHeader(),h('p',{class:'sub'},'Caricamento…'),aTabs('cal'));
+  let base,data;
+  try{base=await adminCalBase();data=await adminLoadRange(d,d)}catch(e){return mount(aHeader(),h('p',{class:'err'},'Errore nel caricamento.'),aTabs('cal'))}
+  const step=n=>{const x=new Date(d);x.setDate(x.getDate()+n);adminDay(x)};
+  const nav=h('div',{class:'row'},
+    h('button',{class:'icon-btn','aria-label':'Torna al mese',onclick:()=>adminMonth(d)},ico('back')),
+    h('button',{class:'linkbtn small',onclick:()=>step(-1)},'‹ Giorno prima'),
+    h('strong',{class:'weeklab'},GIORNI[d.getDay()]+' '+d.getDate()+' '+MESI[d.getMonth()]),
+    h('button',{class:'linkbtn small',onclick:()=>step(1)},'Giorno dopo ›'));
+  base.pick.addEventListener('change',()=>{A.calT=base.pick.value;adminDay(d)});
+  mount(aHeader(),nav,base.pick,data.sessions.length?data.sessions.map(x=>tLessonCard(x,data.cname[x.course_id],data.courses)):h('p',{class:'sub'},'Nessuna lezione in questo giorno.'),aTabs('cal'),footer());
+}
+async function exportMonth(first,last){
+  const wait=h('p',{class:'sub'},'Preparo il file…');
+  const ov=h('div',{class:'dlg-ov'},h('div',{class:'dlg'},wait));document.body.append(ov);
+  try{
+    const tn={};A.staff.staff.forEach(p=>tn[p.id]=p.name);
+    const [cs,ss]=await Promise.all([
+      sb.from('courses').select('id,name,teacher_id'),
+      sb.from('lesson_sessions').select('id,course_id,session_date,start_time,end_time,status,attendance(status,camera_off,mic_off,teacher_note,students(display_name))').gte('session_date',isoD(first)).lte('session_date',isoD(last)).order('session_date').order('start_time')]);
+    if(cs.error||ss.error)throw (cs.error||ss.error);
+    const cn={};cs.data.filter(c=>!A.calT||c.teacher_id===A.calT).forEach(c=>cn[c.id]=c);
+    const ST={present:'Presente',absent:'Assente',absent_notified:'Assente avvisato'};
+    const q=v=>{v=v==null?'':String(v);return /[;"\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+    const rows=[['Data','Inizio','Fine','Corso','Docente','Alunno','Presenza','Camera spenta','Mic spento','Nota docente']];
+    ss.data.filter(x=>cn[x.course_id]).forEach(x=>{
+      const c=cn[x.course_id],base=[x.session_date.split('-').reverse().join('/'),(x.start_time||'').slice(0,5),(x.end_time||'').slice(0,5),c.name,tn[c.teacher_id]||''];
+      const at=x.attendance||[];
+      if(!at.length)rows.push([...base,'','','','','']);
+      at.forEach(a=>rows.push([...base,a.students?a.students.display_name:'',ST[a.status]||a.status||'',a.camera_off?'sì':'',a.mic_off?'sì':'',a.teacher_note||'']));
+    });
+    const csv='\ufeff'+rows.map(r=>r.map(q).join(';')).join('\r\n');
+    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+    const a=h('a',{href:url,download:'presenze-'+first.getFullYear()+'-'+String(first.getMonth()+1).padStart(2,'0')+'.csv'});document.body.append(a);a.click();a.remove();
+    ov.remove();await say('File pronto',(rows.length-1)+' righe esportate (apribile con Excel).');
+  }catch(e){ov.remove();say('Errore',e.message||String(e))}
 }
 
 /* ---------- docente: shell, calendario ---------- */
@@ -1214,6 +1323,7 @@ function tTabs(active){
 }
 const turnoL=s=>s==='morning'?' · mattina':s==='evening'?' · sera':'';
 async function teacherCal(weekStart){
+  if(isAdm())return weekStart?adminDay(weekStart):adminMonth();
   const mon=weekStart?mondayOf(weekStart):mondayOf(new Date());
   const sun=new Date(mon);sun.setDate(sun.getDate()+6);
   const label=mon.getDate()+' '+MESI[mon.getMonth()].slice(0,3).toLowerCase()+' – '+sun.getDate()+' '+MESI[sun.getMonth()].slice(0,3).toLowerCase()+' '+sun.getFullYear();
@@ -1270,7 +1380,7 @@ function tLessonCard(x,c,courses){
   });
   const head=h('button',{class:'lc-head',onclick:()=>{body.hidden=!body.hidden}},
     h('span',{class:'lc-time'},(x.start_time||'').slice(0,5)+(x.end_time?'–'+x.end_time.slice(0,5):'')),
-    h('span',{class:'lc-main'},h('strong',null,c.name),h('span',{class:'sub small'},[x.place,turnoL(x.section).replace(' · ','')].filter(Boolean).join(' · '))),
+    h('span',{class:'lc-main'},h('strong',null,c.name+(isAdm()&&c.tname?' · '+c.tname:'')),h('span',{class:'sub small'},[x.place,turnoL(x.section).replace(' · ','')].filter(Boolean).join(' · '))),
     conf?h('span',{class:'pill g'},conf+' conferm'+(conf===1?'ata':'ate')):null,
     mv.length?h('span',{class:'pill n'},'spostamento'):null);
   return h('div',{class:'card lc'},head,body,msg);
