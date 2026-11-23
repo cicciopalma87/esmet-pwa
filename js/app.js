@@ -450,7 +450,6 @@ async function registroView(filter){
   try{const {data,error}=await sb.rpc('student_attendance',{p_code:S.code});if(error)throw error;list=data||[];LS.set('esmet_att',list)}
   catch(e){list=LS.get('esmet_att',[]);offline=true}
   const c=curCourse();
-  list=list.filter(r=>!c||r.course_id===c.id);
   const years=[...new Set(list.map(r=>+r.date.slice(0,4)).concat([now.getFullYear()]))].sort((a,b)=>b-a);
   const selM=h('select',{class:'txt sel','aria-label':'Mese'},MESI.map((n,i)=>h('option',{value:i,selected:i===f.m},n)));
   const selY=h('select',{class:'txt sel','aria-label':'Anno'},years.map(y=>h('option',{value:y,selected:y===f.y},y)));
