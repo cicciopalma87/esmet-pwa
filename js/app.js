@@ -942,7 +942,8 @@ async function routeStaff(){
   const {data}=await sb.auth.getSession();
   const uid=data.session&&data.session.user&&data.session.user.id;
   let role=null;
-  if(uid){const r=await sb.from('profiles').select('role').eq('id',uid).maybeSingle();role=r.data&&r.data.role}
+  if(uid){const r=await sb.from('profiles').select('role,blocked').eq('id',uid).maybeSingle();role=r.data&&r.data.role;
+    if(r.data&&r.data.blocked){await sb.auth.signOut();teacherLogin('Accesso sospeso dalla scuola. Contatta l’amministrazione.');return}}
   S.role=role;
   if(role==='admin'||role==='secretary')return adminHome('alunni');
   return teacherCal();
@@ -1075,7 +1076,12 @@ function adminDocenti(){
   const st=A.staff.staff.map(p=>h('div',{class:'card'},h('h3',null,p.name),
     h('p',{class:'sub small'},(p.email||'')+' · '+(p.role==='teacher'?'Docente':p.role==='admin'?'Amministratore':'Segreteria')+' · '+(p.languages||[]).join(', ')),
     h('p',{class:'sub small'},p.courses.length?p.courses.map(c=>c.name).join(', '):'Nessuna classe assegnata'),
-    p.role==='teacher'?h('button',{class:'secondary',onclick:()=>inviteDlg(p)},'Modifica lingue e classi'):null));
+    p.blocked?h('p',{class:'err'},'Accesso bloccato'):null,
+    p.role==='teacher'?h('div',{class:'row'},h('button',{class:'secondary',onclick:()=>inviteDlg(p)},'Modifica lingue e classi'),
+      h('button',{class:'secondary',onclick:async()=>{
+        if(!await askYes(p.blocked?'Sblocca accesso':'Blocca accesso',p.blocked?p.name+' potrà di nuovo entrare nell’app.':p.name+' non potrà più entrare né vedere corsi e alunni. Le sue classi e i dati restano. Puoi sbloccarlo quando vuoi.',p.blocked?'Sblocca':'Blocca'))return;
+        const {error}=await sb.rpc('admin_set_staff_blocked',{p_id:p.id,p_blocked:!p.blocked});
+        if(error)return say('Errore',error.message);adminHome('docenti')}},p.blocked?'Sblocca accesso':'Blocca accesso')):null));
   const pe=A.staff.pending.map(i=>h('div',{class:'card'},h('h3',null,i.name||i.email),
     h('p',{class:'sub small'},i.email+' · invitato, non ancora registrato · '+(i.languages||[]).join(', ')),
     h('div',{class:'row'},h('button',{class:'secondary',onclick:()=>inviteMsg(i.email,i.name)},'Messaggio di invito'),
