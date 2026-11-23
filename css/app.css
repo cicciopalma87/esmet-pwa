@@ -150,3 +150,6 @@ label.chk{flex-direction:row;color:var(--ink)}
 
 .banner2{display:flex;text-decoration:none;background:#1f9d55}
 .ann{gap:2px}.ann-b{white-space:pre-wrap;margin:4px 0 0}
+
+.dlg{max-height:88vh;overflow-y:auto}
+.dlg select.txt,.dlg textarea.txt{width:100%;margin:6px 0}

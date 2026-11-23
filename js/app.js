@@ -793,7 +793,7 @@ ENGINES.cards=(ex,box,done)=>{
 /* ---------- teacher ---------- */
 async function teacherEntry(){
   const {data}=await sb.auth.getSession();
-  if(data.session)return teacherCal();
+  if(data.session)return routeStaff();
   teacherLogin();
 }
 function teacherLogin(msg,mode){
@@ -806,7 +806,7 @@ function teacherLogin(msg,mode){
   const goLogin=async()=>{
     const {error}=await sb.auth.signInWithPassword({email:em.value.trim(),password:pw.value});
     if(error){err.textContent=/confirm/i.test(error.message)?'Devi prima confermare l’email: controlla la posta.':'Email o password non corretti.';return}
-    teacherCal();
+    routeStaff();
   };
   const goSignup=async()=>{
     err.textContent='';ok.textContent='';
@@ -933,6 +933,181 @@ async function teacherWhiteboards(c){
     groups.length?groups:h('p',{class:'sub'},'Ancora nessuna lavagna caricata.'),footer());
 }
 
+
+/* ---------- amministratore (Emanuela) ---------- */
+const APPURL='https://cicciopalma87.github.io/esmet-pwa/';
+const LANGS=['Tedesco','Inglese','Francese','Spagnolo','Italiano'];
+const A={ov:null,staff:null,sel:new Set(),q:''};
+async function routeStaff(){
+  const {data}=await sb.auth.getSession();
+  const uid=data.session&&data.session.user&&data.session.user.id;
+  let role=null;
+  if(uid){const r=await sb.from('profiles').select('role').eq('id',uid).maybeSingle();role=r.data&&r.data.role}
+  S.role=role;
+  if(role==='admin'||role==='secretary')return adminHome('alunni');
+  return teacherCal();
+}
+function aDrawer(){
+  const close=()=>ov.remove();
+  const it=(em,l,fn)=>h('button',{class:'dr-item',onclick:()=>{close();fn()}},h('span',{class:'dr-em','aria-hidden':'true'},em),l);
+  const panel=h('div',{class:'dr-panel',role:'dialog','aria-label':'Menu'},
+    h('p',{class:'dr-title'},'Esmet Academy · amministrazione'),
+    it('🧑‍🎓','Alunni',()=>adminHome('alunni')),it('🏫','Classi',()=>adminHome('classi')),it('👩‍🏫','Docenti',()=>adminHome('docenti')),
+    it('📅','Calendario lezioni',()=>teacherCal()),
+    it('🚪','Esci',async()=>{await sb.auth.signOut();teacherLogin()}),
+    h('p',{class:'dr-ver'},'Ver '+CFG.version));
+  const ov=h('div',{class:'dr-ov',onclick:e=>{if(e.target===ov)close()}},panel);document.body.append(ov);
+}
+function aTabs(active){
+  const t=(id,label,em)=>h('button',{class:'tab'+(active===id?' on':''),onclick:()=>adminHome(id)},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
+  return h('nav',{class:'tabbar'},t('alunni','Alunni','🧑‍🎓'),t('classi','Classi','🏫'),t('docenti','Docenti','👩‍🏫'));
+}
+function aHeader(){
+  return h('div',{class:'thead2'},h('div',{class:'thead-top'},
+    h('img',{class:'logo-sm',src:'icons/logo.png',alt:'Esmet Academy'}),
+    h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:aDrawer},ico('menu'))));
+}
+function selEl(opts,val,label){
+  const s=h('select',{class:'txt','aria-label':label||''},...opts.map(o=>h('option',{value:o[0]},o[1])));
+  s.value=val==null?'':val;return s;
+}
+async function adminLoad(){
+  const [o,s]=await Promise.all([sb.rpc('admin_overview'),sb.rpc('admin_staff_list')]);
+  if(o.error||s.error)throw (o.error||s.error);
+  A.ov=o.data;A.staff=s.data;
+}
+async function adminHome(tab){
+  tab=tab||'alunni';
+  mount(aHeader(),h('p',{class:'sub'},'Caricamento…'),aTabs(tab));
+  try{await adminLoad()}catch(e){mount(aHeader(),h('p',{class:'err'},'Non riesco a caricare i dati: '+(e.message||e)),aTabs(tab));return}
+  const body=tab==='classi'?adminClassi():tab==='docenti'?adminDocenti():adminAlunni();
+  mount(aHeader(),body,aTabs(tab));
+}
+const courseName=id=>{const c=A.ov.courses.find(x=>x.id===id);return c?c.name:'?'};
+const courseOpts=(first)=>[...(first?[['',first]]:[]),...A.ov.courses.map(c=>[c.id,c.name+(c.teacher?' · '+c.teacher:'')])];
+function inviteText(name,code){
+  return 'Ciao '+name+', ecco il tuo codice per entrare in Esmet Academy: '+code+'\nApri '+APPURL+' e inseriscilo al primo accesso: poi potrai scegliere email e password.';
+}
+async function showCode(r){
+  const txt=inviteText(r.name,r.code);const msg=h('p',{class:'sub small',role:'status'});
+  await dlg('Alunno creato',[h('p',{class:'sub'},r.name+' · codice:'),h('p',{class:'code-big',style:'font-size:28px;letter-spacing:4px;font-weight:700;text-align:center'},r.code),
+    h('textarea',{class:'txt',rows:'4',readonly:true},txt),msg],close=>[
+    h('button',{class:'secondary',onclick:()=>close(true)},'Chiudi'),
+    h('button',{class:'primary',onclick:async()=>{try{await navigator.clipboard.writeText(txt);msg.textContent='Copiato: incollalo su WhatsApp o email.'}catch(e){msg.textContent='Seleziona e copia il testo.'}}},'Copia messaggio')]);
+}
+function adminAlunni(){
+  const list=h('div',{class:'rows'});const bar=h('div',{class:'bar-row'});
+  const draw=()=>{
+    const q=norm(A.q);
+    list.replaceChildren(...A.ov.students.filter(s=>!q||norm(s.name).includes(q)||norm(s.code).includes(q)).map(s=>{
+      const cb=h('input',{type:'checkbox','aria-label':'Seleziona '+s.name});cb.checked=A.sel.has(s.id);
+      cb.addEventListener('change',()=>{cb.checked?A.sel.add(s.id):A.sel.delete(s.id);drawBar()});
+      return h('label',{class:'chk-row'},cb,h('span',{style:'flex:1'},h('strong',null,s.name),' ',h('span',{class:'sub small'},s.code+(s.has_account?' · account email':'')),
+        h('br'),h('span',{class:'sub small'},s.course_ids.length?s.course_ids.map(courseName).join(', '):'nessuna classe')));
+    }));
+    if(!list.children.length)list.append(h('p',{class:'sub'},'Nessun alunno.'));
+  };
+  const drawBar=()=>{
+    const n=A.sel.size;
+    bar.replaceChildren(h('span',{class:'sub small'},n+' selezionati'),
+      h('button',{class:'secondary',disabled:n?null:true,onclick:()=>assignDlg('assign')},'Assegna a classe'),
+      h('button',{class:'secondary',disabled:n?null:true,onclick:()=>assignDlg('move')},'Sposta'));
+  };
+  const q=h('input',{class:'txt',type:'search',placeholder:'Cerca nome o codice',value:A.q});
+  q.addEventListener('input',()=>{A.q=q.value;draw()});
+  draw();drawBar();
+  return h('div',null,h('h2',{class:'sect'},'Alunni'),
+    h('button',{class:'primary',onclick:newStudent},'+ Nuovo alunno'),q,bar,list);
+}
+async function newStudent(){
+  const nm=h('input',{class:'txt',type:'text',placeholder:'Nome e cognome'});
+  const cs=selEl(courseOpts('— nessuna classe (per ora) —'),'','Classe');
+  const v=await dlg('Nuovo alunno',[nm,h('p',{class:'sub small'},'Classe:'),cs,h('p',{class:'sub small'},'Il codice viene generato automaticamente.')],close=>[
+    h('button',{class:'secondary',onclick:()=>close(null)},'Annulla'),h('button',{class:'primary',onclick:()=>close({n:nm.value,c:cs.value})},'Crea')]);
+  if(!v||!v.n.trim())return;
+  const {data,error}=await sb.rpc('admin_create_student',{p_name:v.n,p_course:v.c||null});
+  if(error)return say('Errore',error.message);
+  await showCode(data);adminHome('alunni');
+}
+async function assignDlg(mode){
+  const ids=[...A.sel];
+  const fromIds=[...new Set(A.ov.students.filter(s=>A.sel.has(s.id)).flatMap(s=>s.course_ids))];
+  const from=selEl(fromIds.map(i=>[i,courseName(i)]),fromIds[0]||'','Da classe');
+  const to=selEl(courseOpts(),A.ov.courses[0]&&A.ov.courses[0].id,'A classe');
+  const nodes=mode==='move'?[h('p',{class:'sub small'},'Da quale classe:'),from,h('p',{class:'sub small'},'A quale classe:'),to]:[h('p',{class:'sub small'},ids.length+' alunni da aggiungere a:'),to];
+  const ok=await dlg(mode==='move'?'Sposta alunni':'Assegna a una classe',nodes,close=>[
+    h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),h('button',{class:'primary',onclick:()=>close(true)},'Conferma')]);
+  if(!ok)return;
+  const {error}=mode==='move'?await sb.rpc('admin_move_students',{p_students:ids,p_from:from.value,p_to:to.value}):await sb.rpc('admin_assign_students',{p_students:ids,p_course:to.value});
+  if(error)return say('Errore',error.message);
+  A.sel.clear();adminHome('alunni');
+}
+function adminClassi(){
+  const cards=A.ov.courses.map(c=>{
+    const stu=A.ov.students.filter(s=>s.course_ids.includes(c.id));
+    return h('div',{class:'card'},h('h3',null,c.name),
+      h('p',{class:'sub small'},(c.kind==='group'?'Gruppo':c.kind==='individual'?'Individuale':'Conversazione')+' · '+c.language+' · docente: '+(c.teacher||'non assegnato')),
+      h('p',{class:'sub small'},stu.length?stu.map(s=>s.name).join(', '):'Nessun alunno'),
+      h('button',{class:'secondary',onclick:()=>changeTeacher(c)},'Cambia docente'));
+  });
+  return h('div',null,h('h2',{class:'sect'},'Classi'),h('button',{class:'primary',onclick:newClass},'+ Nuova classe'),...cards);
+}
+const teacherOpts=()=>[['','— nessun docente —'],...A.staff.staff.filter(p=>p.role==='teacher').map(p=>[p.id,p.name])];
+async function changeTeacher(c){
+  const t=selEl(teacherOpts(),c.teacher_id||'','Docente');
+  const ok=await dlg('Docente di '+c.name,[t],close=>[h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),h('button',{class:'primary',onclick:()=>close(true)},'Salva')]);
+  if(!ok)return;
+  const {error}=await sb.rpc('admin_set_course_teacher',{p_course:c.id,p_teacher:t.value||null});
+  if(error)return say('Errore',error.message);adminHome('classi');
+}
+async function newClass(){
+  const nm=h('input',{class:'txt',type:'text',placeholder:'Nome (es. Tedesco A2 – sera)'});
+  const lv=selEl(['A1','A2','B1','B2','C1','C2'].map(x=>[x,x]),'A1','Livello');
+  const kd=selEl([['group','Corso di gruppo'],['individual','Corso individuale'],['conversation','Conversazione']],'group','Tipo');
+  const lg=selEl(LANGS.map(x=>[x,x]),'Tedesco','Lingua');
+  const t=selEl(teacherOpts(),'','Docente');
+  const ok=await dlg('Nuova classe',[nm,lv,kd,lg,h('p',{class:'sub small'},'Docente:'),t],close=>[h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),h('button',{class:'primary',onclick:()=>close(true)},'Crea')]);
+  if(!ok||!nm.value.trim())return;
+  const {error}=await sb.rpc('admin_create_course',{p_name:nm.value,p_level:lv.value,p_kind:kd.value,p_teacher:t.value||null,p_language:lg.value});
+  if(error)return say('Errore',error.message);adminHome('classi');
+}
+function adminDocenti(){
+  const st=A.staff.staff.map(p=>h('div',{class:'card'},h('h3',null,p.name),
+    h('p',{class:'sub small'},(p.email||'')+' · '+(p.role==='teacher'?'Docente':p.role==='admin'?'Amministratore':'Segreteria')+' · '+(p.languages||[]).join(', ')),
+    h('p',{class:'sub small'},p.courses.length?p.courses.map(c=>c.name).join(', '):'Nessuna classe assegnata'),
+    p.role==='teacher'?h('button',{class:'secondary',onclick:()=>inviteDlg(p)},'Modifica lingue e classi'):null));
+  const pe=A.staff.pending.map(i=>h('div',{class:'card'},h('h3',null,i.name||i.email),
+    h('p',{class:'sub small'},i.email+' · invitato, non ancora registrato · '+(i.languages||[]).join(', ')),
+    h('div',{class:'row'},h('button',{class:'secondary',onclick:()=>inviteMsg(i.email,i.name)},'Messaggio di invito'),
+      h('button',{class:'secondary',onclick:async()=>{if(await askYes('Annullare invito',i.email,'Annulla invito')){await sb.rpc('admin_remove_invite',{p_email:i.email});adminHome('docenti')}}},'Annulla invito'))));
+  return h('div',null,h('h2',{class:'sect'},'Docenti'),h('button',{class:'primary',onclick:()=>inviteDlg(null)},'+ Invita docente'),
+    ...st,pe.length?h('h3',null,'Inviti in attesa'):null,...pe);
+}
+async function inviteMsg(email,name){
+  const txt='Ciao'+(name?' '+name:'')+', sei stato abilitato come docente su Esmet Academy.\nApri '+APPURL+'#docente , scegli "Primo accesso" e registrati con questa email ('+email+'), poi conferma il link che ti arriva per posta.';
+  const msg=h('p',{class:'sub small',role:'status'});
+  await dlg('Messaggio di invito',[h('textarea',{class:'txt',rows:'5',readonly:true},txt),msg],close=>[
+    h('button',{class:'secondary',onclick:()=>close(true)},'Chiudi'),
+    h('button',{class:'primary',onclick:async()=>{try{await navigator.clipboard.writeText(txt);msg.textContent='Copiato.'}catch(e){msg.textContent='Seleziona e copia il testo.'}}},'Copia')]);
+}
+async function inviteDlg(p){
+  const em=h('input',{class:'txt',type:'email',placeholder:'Email del docente',value:p?p.email:'',readonly:p?true:null});
+  const nm=h('input',{class:'txt',type:'text',placeholder:'Nome e cognome',value:p?p.name:''});
+  const lgs=LANGS.map(l=>{const c=h('input',{type:'checkbox'});c.checked=p?(p.languages||[]).includes(l):l==='Tedesco';return [l,c]});
+  const mine=p?p.courses.map(c=>c.id):[];
+  const crs=A.ov.courses.map(c=>{const c2=h('input',{type:'checkbox'});c2.checked=mine.includes(c.id);return [c.id,c.name,c2]});
+  const err=h('p',{class:'err',role:'alert'});
+  const v=await dlg(p?'Modifica docente':'Invita docente',[em,nm,h('p',{class:'sub small'},'Lingue insegnate:'),
+    ...lgs.map(([l,c])=>h('label',{class:'chk-row'},c,l)),h('p',{class:'sub small'},'Classi assegnate:'),
+    ...crs.map(([id,n,c])=>h('label',{class:'chk-row'},c,n)),err],close=>[
+    h('button',{class:'secondary',onclick:()=>close(null)},'Annulla'),
+    h('button',{class:'primary',onclick:()=>{if(!/.+@.+\..+/.test(em.value)){err.textContent='Inserisci una email valida.';return}close(true)}},'Salva')]);
+  if(!v)return;
+  const {error}=await sb.rpc('admin_invite_staff',{p_email:em.value,p_full_name:nm.value,p_role:'teacher',p_languages:lgs.filter(x=>x[1].checked).map(x=>x[0]),p_course_ids:crs.filter(x=>x[2].checked).map(x=>x[0])});
+  if(error)return say('Errore',error.message);
+  if(!p)await inviteMsg(em.value.trim().toLowerCase(),nm.value);
+  adminHome('docenti');
+}
 
 /* ---------- docente: shell, calendario ---------- */
 function tDrawer(){
