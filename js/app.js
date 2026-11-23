@@ -976,10 +976,10 @@ async function sessionForm(courses,x,weekMon,acceptStudent){
     const u=(await sb.auth.getUser()).data.user;
     const [pr,en]=await Promise.all([
       sb.from('profiles').select('languages').eq('id',u.id).maybeSingle(),
-      sb.from('enrollments').select('course_id,students(display_name)')]);
+      sb.from('enrollments').select('course_id,students(id,display_name)')]);
     if(pr.data&&pr.data.languages&&pr.data.languages.length)langs=pr.data.languages;
-    const byC={};(en.data||[]).forEach(e=>{if(e.students)byC[e.course_id]=e.students.display_name});
-    indiv=courses.filter(c=>c.kind==='individual').map(c=>({id:c.id,language:c.language||'Tedesco',name:byC[c.id]||c.name}));
+    const seen={};(en.data||[]).forEach(e=>{if(e.students)seen[e.students.id]=e.students.display_name});
+    indiv=Object.entries(seen).map(([id,name])=>({id,name}));
   }
   const lang=h('select',{class:'txt sel','aria-label':'Lingua'},langs.map(l=>h('option',{value:l},l)));
   const tipo=h('select',{class:'txt sel','aria-label':'Tipo di corso'},[['individual','Corso individuale'],['group','Corso di gruppo']].map(([v,t])=>h('option',{value:v},t)));
@@ -991,7 +991,7 @@ async function sessionForm(courses,x,weekMon,acceptStudent){
     const L=lang.value;
     sub.replaceChildren();
     if(tipo.value==='individual'){
-      const list=indiv.filter(c=>c.language===L).sort((p,q)=>p.name.localeCompare(q.name));
+      const list=indiv.slice().sort((p,q)=>p.name.localeCompare(q.name));
       if(!list.length)sub.append(h('option',{value:''},'Nessun alunno assegnato'));
       list.forEach(c=>sub.append(h('option',{value:c.id},c.name)));
       grpWrap.hidden=true;
@@ -1005,7 +1005,18 @@ async function sessionForm(courses,x,weekMon,acceptStudent){
     const g=groupsOf();grp.replaceChildren(...g.map(c=>h('option',{value:c.id},c.name)));
     grpWrap.hidden=g.length<2;
   };
-  const courseId=()=>edit?x.course_id:(tipo.value==='individual'?sub.value:(groupsOf()[grp.selectedIndex>=0?grp.selectedIndex:0]||{}).id);
+  const resolveCourse=async()=>{
+    if(edit)return courses.find(k=>k.id===x.course_id);
+    if(tipo.value==='individual'){
+      if(!sub.value)return null;
+      const r=await sb.rpc('teacher_ensure_individual_course',{p_student:sub.value,p_language:lang.value});
+      return r.error?null:r.data;
+    }
+    const g=groupsOf();
+    if(g.length)return g[grp.selectedIndex>=0?grp.selectedIndex:0];
+    const r=await sb.rpc('teacher_ensure_group_course',{p_language:lang.value,p_level:sub.value});
+    return r.error?null:r.data;
+  };
   lang.addEventListener('change',fill);tipo.addEventListener('change',fill);sub.addEventListener('change',()=>{if(tipo.value==='group')fillGrp()});
   if(!edit)fill();
   const date=h('input',{class:'txt',type:'date',value:x?x.session_date:isoD(new Date())});
@@ -1021,14 +1032,16 @@ async function sessionForm(courses,x,weekMon,acceptStudent){
   const err=h('p',{class:'err',role:'alert'});
   const save=h('button',{class:'primary',onclick:async()=>{
     err.textContent='';
-    const cid=courseId();
-    if(!cid){err.textContent=tipo.value==='group'?'Non c’è un corso di gruppo di questo livello assegnato a te. Chiedi all’amministratore.':'Scegli l’alunno.';return}
+    if(tipo.value==='individual'&&!edit&&!sub.value){err.textContent='Scegli l’alunno.';return}
     if(!date.value||!st.value){err.textContent='Inserisci data e ora di inizio.';return}
     if(en2.value&&en2.value<=st.value){err.textContent='La fine deve essere dopo l’inizio.';return}
-    const c=courses.find(k=>k.id===cid);
+    save.disabled=true;
+    const c=await resolveCourse();
+    if(!c){err.textContent='Non riesco a preparare il corso. Riprova o scrivi all’assistenza.';save.disabled=false;return}
+    const cid=c.id;
     const dur=en2.value?(parseInt(en2.value.slice(0,2))*60+parseInt(en2.value.slice(3))-(parseInt(st.value.slice(0,2))*60+parseInt(st.value.slice(3)))):60;
     const base={start_time:st.value,end_time:en2.value||null,place:place.value.trim()||null,duration_min:dur,section:sec.value};
-    save.disabled=true;let error=null;
+    let error=null;
     if(edit){
       ({error}=await sb.from('lesson_sessions').update({...base,session_date:date.value}).eq('id',x.id));
       if(!error&&acceptStudent)await sb.from('session_responses').update({status:'accepted'}).eq('session_id',x.id).eq('student_id',acceptStudent);
