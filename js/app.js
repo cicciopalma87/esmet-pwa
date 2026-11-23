@@ -285,6 +285,7 @@ function drawer(){
     h('button',{class:'dr-item',onclick:()=>{close();homeView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📚'),'Lezioni'),
     h('button',{class:'dr-item',onclick:()=>{close();registroView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📋'),'Registro'),
     h('button',{class:'dr-item',onclick:()=>{close();lavagneView()}},h('span',{class:'dr-em','aria-hidden':'true'},'🖼️'),'Lavagne'),
+    h('button',{class:'dr-item',onclick:()=>{close();avvisiView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📢'),'Avvisi'),
     item('user','Il mio profilo',()=>profileView()),
     item('key','Il mio accesso',()=>accountView()),
     h('button',{class:'dr-item',onclick:()=>{close();ticketView()}},h('span',{class:'dr-em','aria-hidden':'true'},'🛟'),'Assistenza'),
@@ -372,6 +373,13 @@ async function calView(weekStart,offline){
   try{const {data,error}=await sb.rpc('student_calendar',{p_code:S.code,p_from:isoD(mon),p_to:isoD(sun)});if(error)throw error;list=data||[];LS.set('esmet_cal_'+isoD(mon),list)}
   catch(e){list=LS.get('esmet_cal_'+isoD(mon),[]);off=true}
   const c0=curCourse();const [jb,jm]=c0?joinBlock(c0):[null,null];
+  let ann=LS.get('esmet_ann',[]),links=LS.get('esmet_links',{});
+  try{const [a,l]=await Promise.all([sb.rpc('student_announcements',{p_code:S.code}),sb.rpc('student_course_links',{p_code:S.code})]);
+    if(Array.isArray(a.data)){ann=a.data;LS.set('esmet_ann',ann)}if(l.data){links=l.data;LS.set('esmet_links',links)}}catch(e){}
+  const chatUrl=c0&&links[c0.id];
+  const chatBtn=chatUrl?h('a',{class:'banner banner2',href:chatUrl,target:'_blank',rel:'noopener'},h('span',null,'💬 Chat del corso')):null;
+  const annBox=ann.length?h('div',{class:'card'},h('div',{class:'row'},h('h3',null,'📢 Avvisi'),h('button',{class:'linkbtn small',onclick:()=>avvisiView()},'Vedi tutti')),
+    ann.slice(0,2).map(a=>h('div',{class:'ann'},h('strong',null,a.title),h('span',{class:'sub small'},' · '+new Date(a.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'})),a.body?h('p',{class:'sub small ann-b'},a.body):null))):null;
   const todayK=isoD(new Date());
   const days=[];for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(d.getDate()+i);days.push(d)}
   const blocks=days.map(d=>{
@@ -382,7 +390,7 @@ async function calView(weekStart,offline){
   });
   mount(tabHeader(),
     off?h('p',{class:'sub small'},'Sei offline: vedi l’ultimo calendario scaricato.'):null,
-    jb,jm,
+    jb,jm,chatBtn,annBox,
     nav,
     accountBanner(),
     blocks.some(Boolean)?blocks:h('p',{class:'sub'},'Nessuna lezione in programma questa settimana.'),
@@ -411,6 +419,14 @@ function lessonCard(x){
     h('span',{class:'lc-main'},h('strong',null,x.course),x.place?h('span',{class:'sub small'},x.place+(x.section==='morning'?' · mattina':x.section==='evening'?' · sera':'')):(x.section==='morning'?h('span',{class:'sub small'},'mattina'):x.section==='evening'?h('span',{class:'sub small'},'sera'):null)),
     st?h('span',{class:'pill '+st[1]},st[0]):null);
   return h('div',{class:'card lc'},head,body,msg);
+}
+
+
+async function avvisiView(){
+  const back=()=>calView();
+  mount(topbar('Avvisi',back),h('p',{class:'sub'},'Caricamento…'));
+  let list;try{const {data,error}=await sb.rpc('student_announcements',{p_code:S.code});if(error)throw error;list=data||[];LS.set('esmet_ann',list)}catch(e){list=LS.get('esmet_ann',[])}
+  mount(topbar('Avvisi',back),list.length?list.map(a=>h('div',{class:'card ann'},h('div',{class:'row'},h('strong',null,a.title),h('span',{class:'sub small'},new Date(a.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'}))),h('p',{class:'sub small'},a.course),a.body?h('p',{class:'ann-b'},a.body):null)):h('p',{class:'sub'},'Nessun avviso.'),footer());
 }
 
 /* ---------- profilo ---------- */
@@ -812,7 +828,7 @@ function teacherLogin(msg,mode){
 async function teacherHome(){
   mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),h('p',{class:'sub'},'Caricamento…'),tTabs('corsi'));
   const [cs,en]=await Promise.all([
-    sb.from('courses').select('id,school_id,name,level,kind,zoom_url').eq('active',true).order('name'),
+    sb.from('courses').select('id,school_id,name,level,kind,zoom_url,chat_url').eq('active',true).order('name'),
     sb.from('enrollments').select('course_id,section,students(id,display_name,code,consent_at)')
   ]);
   if(cs.error||en.error)return mount(tHeader(),h('p',{class:'err'},'Errore nel caricamento. Il tuo account ha un profilo docente?'),tTabs('corsi'),footer());
@@ -824,7 +840,7 @@ async function teacherHome(){
         h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
       h('div',{class:'row'},
         h('button',{class:'primary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
-        h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link Zoom del corso','Incolla il link (lascia vuoto per cancellarlo)',c.zoom_url||'','Salva');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
+        h('button',{class:'secondary',onclick:()=>teacherAnnouncements(c)},'Avvisi'),h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link della chat','Gruppo WhatsApp: incolla il link d’invito. Chat singola: https://wa.me/39… (lascia vuoto per cancellare)',c.chat_url||'','Salva');if(v===null)return;const u=v.trim();if(u&&!/^https:\/\//.test(u)){await say('Link non valido','Il link deve iniziare con https://');return}const {error}=await sb.from('courses').update({chat_url:u||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.chat_url?'Chat ✓':'Chat'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link Zoom del corso','Incolla il link (lascia vuoto per cancellarlo)',c.zoom_url||'','Salva');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
   });
   mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),tTabs('corsi'),footer());
 }
@@ -1097,6 +1113,34 @@ async function sessionForm(courses,x,weekMon,acceptStudent){
       h('label',null,'Turno (solo per i corsi di gruppo)',sec),h('label',null,'Dove',place),
       edit?null:h('div',null,h('p',{class:'sub small'},'Ripeti nei giorni (a partire dalla data scelta):'),h('div',{class:'row'},dchk.map(d=>d.el)),h('label',null,'Per quante settimane (compresa la prima)',weeks)),
       save,err),footer());
+}
+
+
+async function teacherAnnouncements(c){
+  const back=()=>teacherHome();
+  mount(topbar('Avvisi · '+c.name,back),h('p',{class:'sub'},'Caricamento…'));
+  const [ls,cs]=await Promise.all([
+    sb.from('announcements').select('id,title,body,created_at,course_id').eq('course_id',c.id).order('created_at',{ascending:false}).limit(40),
+    sb.from('courses').select('id,school_id,name').eq('active',true)]);
+  if(ls.error)return mount(topbar('Avvisi',back),h('p',{class:'err'},'Errore nel caricamento.'),footer());
+  const ti=h('input',{class:'txt',type:'text',maxlength:'120',placeholder:'Titolo (es. Lezione di giovedì spostata)'});
+  const bo=h('textarea',{class:'txt',rows:'4',maxlength:'1200',placeholder:'Testo (facoltativo)'});
+  const scope=h('select',{class:'txt sel','aria-label':'Destinatari'},[['one','Solo questo corso'],['all','Tutti i miei corsi']].map(([v,t])=>h('option',{value:v},t)));
+  const msg=h('p',{role:'status'});
+  const pub=h('button',{class:'primary',onclick:async()=>{
+    if(!ti.value.trim()){msg.className='err';msg.textContent='Scrivi un titolo.';return}
+    pub.disabled=true;
+    const targets=scope.value==='all'?cs.data:[c];
+    const {error}=await sb.from('announcements').insert(targets.map(t=>({school_id:t.school_id||c.school_id,course_id:t.id,title:ti.value.trim(),body:bo.value.trim()||null})));
+    pub.disabled=false;
+    if(error){msg.className='err';msg.textContent='Non pubblicato: '+error.message;return}
+    teacherAnnouncements(c);
+  }},'Pubblica');
+  mount(topbar('Avvisi · '+c.name,back),
+    h('div',{class:'card'},h('h3',null,'Nuovo avviso'),ti,bo,h('label',null,'Destinatari',scope),pub,msg),
+    ls.data.map(a=>h('div',{class:'card ann'},h('div',{class:'row'},h('strong',null,a.title),h('span',{class:'sub small'},fmtDate(a.created_at))),a.body?h('p',{class:'ann-b'},a.body):null,
+      h('button',{class:'linkbtn small',onclick:async()=>{if(!await askYes('Eliminare l’avviso?','Gli alunni non lo vedranno più.','Elimina'))return;await sb.from('announcements').delete().eq('id',a.id);teacherAnnouncements(c)}},'Elimina'))),
+    footer());
 }
 
 /* --- sblocco lezioni per gruppo di alunni --- */
