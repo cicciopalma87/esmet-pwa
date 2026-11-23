@@ -924,7 +924,7 @@ async function teacherCal(weekStart){
     h('button',{class:'linkbtn small',onclick:()=>teacherCal()},'Oggi'));
   mount(tHeader(),nav,h('p',{class:'sub'},'Caricamento…'),tTabs('cal'));
   const [cs,ss]=await Promise.all([
-    sb.from('courses').select('id,school_id,name,kind').eq('active',true).order('name'),
+    sb.from('courses').select('id,school_id,name,kind,level,language').eq('active',true).order('name'),
     sb.from('lesson_sessions').select('id,course_id,section,session_date,start_time,end_time,place,status,session_responses(student_id,response,status,note,students(display_name))').gte('session_date',isoD(mon)).lte('session_date',isoD(sun)).order('session_date').order('start_time')]);
   if(cs.error||ss.error)return mount(tHeader(),h('p',{class:'err'},'Errore nel caricamento del calendario.'),tTabs('cal'),footer());
   const cname={};cs.data.forEach(c=>cname[c.id]=c);
@@ -966,49 +966,94 @@ function tLessonCard(x,c,courses){
     mv.length?h('span',{class:'pill n'},'spostamento'):null);
   return h('div',{class:'card lc'},head,body,msg);
 }
-function sessionForm(courses,x,weekMon,acceptStudent){
+async function sessionForm(courses,x,weekMon,acceptStudent){
   const back=()=>teacherCal(x?new Date(x.session_date+'T12:00:00'):weekMon);
   const edit=!!x;
-  const course=h('select',{class:'txt sel','aria-label':'Corso'},courses.map(c=>h('option',{value:c.id,selected:x&&x.course_id===c.id},c.name)));
+  const parse0=s=>{const p=s.split('-').map(Number);return new Date(p[0],p[1]-1,p[2])};
+  let langs=['Tedesco'],indiv=[];
+  if(!edit){
+    mount(topbar('Nuova lezione',back),h('p',{class:'sub'},'Caricamento…'));
+    const u=(await sb.auth.getUser()).data.user;
+    const [pr,en]=await Promise.all([
+      sb.from('profiles').select('languages').eq('id',u.id).maybeSingle(),
+      sb.from('enrollments').select('course_id,students(display_name)')]);
+    if(pr.data&&pr.data.languages&&pr.data.languages.length)langs=pr.data.languages;
+    const byC={};(en.data||[]).forEach(e=>{if(e.students)byC[e.course_id]=e.students.display_name});
+    indiv=courses.filter(c=>c.kind==='individual').map(c=>({id:c.id,language:c.language||'Tedesco',name:byC[c.id]||c.name}));
+  }
+  const lang=h('select',{class:'txt sel','aria-label':'Lingua'},langs.map(l=>h('option',{value:l},l)));
+  const tipo=h('select',{class:'txt sel','aria-label':'Tipo di corso'},[['individual','Corso individuale'],['group','Corso di gruppo']].map(([v,t])=>h('option',{value:v},t)));
+  const sub=h('select',{class:'txt sel','aria-label':'Alunno o livello'});
+  const grp=h('select',{class:'txt sel','aria-label':'Gruppo'});
+  const grpWrap=h('label',{hidden:'hidden'},'Gruppo',grp);
+  const LIV=['A1','A2','B1','B2','C1','C2'];
+  const fill=()=>{
+    const L=lang.value;
+    sub.replaceChildren();
+    if(tipo.value==='individual'){
+      const list=indiv.filter(c=>c.language===L).sort((p,q)=>p.name.localeCompare(q.name));
+      if(!list.length)sub.append(h('option',{value:''},'Nessun alunno assegnato'));
+      list.forEach(c=>sub.append(h('option',{value:c.id},c.name)));
+      grpWrap.hidden=true;
+    }else{
+      LIV.forEach(v=>sub.append(h('option',{value:v},v)));
+      fillGrp();
+    }
+  };
+  const groupsOf=()=>courses.filter(c=>c.kind==='group'&&(c.language||'Tedesco')===lang.value&&c.level===sub.value);
+  const fillGrp=()=>{
+    const g=groupsOf();grp.replaceChildren(...g.map(c=>h('option',{value:c.id},c.name)));
+    grpWrap.hidden=g.length<2;
+  };
+  const courseId=()=>edit?x.course_id:(tipo.value==='individual'?sub.value:(groupsOf()[grp.selectedIndex>=0?grp.selectedIndex:0]||{}).id);
+  lang.addEventListener('change',fill);tipo.addEventListener('change',fill);sub.addEventListener('change',()=>{if(tipo.value==='group')fillGrp()});
+  if(!edit)fill();
   const date=h('input',{class:'txt',type:'date',value:x?x.session_date:isoD(new Date())});
   const st=h('input',{class:'txt',type:'time',value:x&&x.start_time?x.start_time.slice(0,5):''});
-  const en=h('input',{class:'txt',type:'time',value:x&&x.end_time?x.end_time.slice(0,5):''});
+  const en2=h('input',{class:'txt',type:'time',value:x&&x.end_time?x.end_time.slice(0,5):''});
   const sec=h('select',{class:'txt sel','aria-label':'Turno'},[['','Nessun turno'],['morning','Mattina'],['evening','Sera']].map(([v,t])=>h('option',{value:v,selected:(x&&x.section||'')===v},t)));
   const place=h('input',{class:'txt',type:'text',placeholder:'Dove (es. Online)',value:x?(x.place||''):'Online',maxlength:'80'});
   const weeks=h('input',{class:'txt',type:'number',min:'1',max:'52',value:'1'});
   const dayNames=['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
   const dchk=dayNames.map((n,i)=>{const cb=h('input',{type:'checkbox'});return {cb,i,el:h('label',{class:'att-chk'},cb,n)}});
   const syncDay=()=>{const wd=(parse0(date.value).getDay()+6)%7;dchk.forEach(d=>d.cb.checked=(d.i===wd))};
-  function parse0(s){const p=s.split('-').map(Number);return new Date(p[0],p[1]-1,p[2])}
   date.addEventListener('change',syncDay);syncDay();
   const err=h('p',{class:'err',role:'alert'});
   const save=h('button',{class:'primary',onclick:async()=>{
     err.textContent='';
+    const cid=courseId();
+    if(!cid){err.textContent=tipo.value==='group'?'Non c’è un corso di gruppo di questo livello assegnato a te. Chiedi all’amministratore.':'Scegli l’alunno.';return}
     if(!date.value||!st.value){err.textContent='Inserisci data e ora di inizio.';return}
-    if(en.value&&en.value<=st.value){err.textContent='La fine deve essere dopo l’inizio.';return}
-    const c=courses.find(k=>k.id===course.value);
-    const dur=en.value?(parseInt(en.value.slice(0,2))*60+parseInt(en.value.slice(3))-(parseInt(st.value.slice(0,2))*60+parseInt(st.value.slice(3)))):60;
-    const base={start_time:st.value,end_time:en.value||null,place:place.value.trim()||null,duration_min:dur,section:sec.value};
+    if(en2.value&&en2.value<=st.value){err.textContent='La fine deve essere dopo l’inizio.';return}
+    const c=courses.find(k=>k.id===cid);
+    const dur=en2.value?(parseInt(en2.value.slice(0,2))*60+parseInt(en2.value.slice(3))-(parseInt(st.value.slice(0,2))*60+parseInt(st.value.slice(3)))):60;
+    const base={start_time:st.value,end_time:en2.value||null,place:place.value.trim()||null,duration_min:dur,section:sec.value};
     save.disabled=true;let error=null;
     if(edit){
-      ({error}=await sb.from('lesson_sessions').update({...base,session_date:date.value,course_id:course.value}).eq('id',x.id));
+      ({error}=await sb.from('lesson_sessions').update({...base,session_date:date.value}).eq('id',x.id));
       if(!error&&acceptStudent)await sb.from('session_responses').update({status:'accepted'}).eq('session_id',x.id).eq('student_id',acceptStudent);
     }else{
       const n=Math.max(1,Math.min(52,parseInt(weeks.value,10)||1));
       const d0=parse0(date.value);const mon0=new Date(d0);mon0.setDate(mon0.getDate()-((mon0.getDay()+6)%7));
       const rows=[];
-      for(let w=0;w<n;w++)dchk.filter(d=>d.cb.checked).forEach(d=>{const dd=new Date(mon0);dd.setDate(dd.getDate()+7*w+d.i);if(dd>=d0)rows.push({...base,school_id:c.school_id,course_id:course.value,session_date:isoD(dd),kind:'regular',status:'scheduled'})});
+      for(let w=0;w<n;w++)dchk.filter(d=>d.cb.checked).forEach(d=>{const dd=new Date(mon0);dd.setDate(dd.getDate()+7*w+d.i);if(dd>=d0)rows.push({...base,school_id:c.school_id,course_id:cid,session_date:isoD(dd),kind:'regular',status:'scheduled'})});
       if(!rows.length){err.textContent='Scegli almeno un giorno.';save.disabled=false;return}
       ({error}=await sb.from('lesson_sessions').upsert(rows,{onConflict:'course_id,section,session_date,kind',ignoreDuplicates:true}));
     }
     if(error){err.textContent='Non salvato: '+error.message;save.disabled=false;return}
     teacherCal(parse0(date.value));
   }},edit?'Salva modifiche':'Salva');
+  const cname=edit?((courses.find(k=>k.id===x.course_id)||{}).name||''):null;
   mount(topbar(edit?'Modifica lezione':'Nuova lezione',back),
     h('div',{class:'card'},
       acceptStudent?h('p',{class:'sub small'},'Imposta il nuovo orario: salvando, la richiesta risulta accettata.'):null,
-      h('label',null,'Corso',course),h('label',null,'Data',date),
-      h('div',{class:'row'},h('label',null,'Inizio',st),h('label',null,'Fine',en)),
+      edit?h('p',null,h('strong',null,cname)):[
+        langs.length>1?h('label',null,'Lingua',lang):null,
+        h('label',null,'Tipo di corso',tipo),
+        h('label',null,'Alunno / livello',sub),
+        grpWrap],
+      h('label',null,'Data',date),
+      h('div',{class:'row'},h('label',null,'Inizio',st),h('label',null,'Fine',en2)),
       h('label',null,'Turno (solo per i corsi di gruppo)',sec),h('label',null,'Dove',place),
       edit?null:h('div',null,h('p',{class:'sub small'},'Ripeti nei giorni (a partire dalla data scelta):'),h('div',{class:'row'},dchk.map(d=>d.el)),h('label',null,'Per quante settimane (compresa la prima)',weeks)),
       save,err),footer());
