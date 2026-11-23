@@ -750,7 +750,7 @@ ENGINES.cards=(ex,box,done)=>{
 /* ---------- teacher ---------- */
 async function teacherEntry(){
   const {data}=await sb.auth.getSession();
-  if(data.session)return teacherHome();
+  if(data.session)return teacherCal();
   teacherLogin();
 }
 function teacherLogin(msg,mode){
@@ -763,7 +763,7 @@ function teacherLogin(msg,mode){
   const goLogin=async()=>{
     const {error}=await sb.auth.signInWithPassword({email:em.value.trim(),password:pw.value});
     if(error){err.textContent=/confirm/i.test(error.message)?'Devi prima confermare l’email: controlla la posta.':'Email o password non corretti.';return}
-    teacherHome();
+    teacherCal();
   };
   const goSignup=async()=>{
     err.textContent='';ok.textContent='';
@@ -783,13 +783,12 @@ function teacherLogin(msg,mode){
     h('p',{class:'sub small'},h('a',{href:'./',onclick:()=>{location.hash='';setTimeout(()=>location.reload(),0)}},'← Area studenti')),footer());
 }
 async function teacherHome(){
-  const out=h('button',{class:'linkbtn',onclick:async()=>{await sb.auth.signOut();teacherLogin()}},'Esci');
-  mount(header(out),h('h1',null,'Area docenti'),h('p',{class:'sub'},'Caricamento…'));
+  mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),h('p',{class:'sub'},'Caricamento…'),tTabs('corsi'));
   const [cs,en]=await Promise.all([
     sb.from('courses').select('id,school_id,name,level,kind,zoom_url').eq('active',true).order('name'),
     sb.from('enrollments').select('course_id,section,students(id,display_name,code,consent_at)')
   ]);
-  if(cs.error||en.error)return mount(header(out),h('p',{class:'err'},'Errore nel caricamento. Il tuo account ha un profilo docente?'),footer());
+  if(cs.error||en.error)return mount(tHeader(),h('p',{class:'err'},'Errore nel caricamento. Il tuo account ha un profilo docente?'),tTabs('corsi'),footer());
   const blocks=cs.data.map(c=>{
     const studs=en.data.filter(e=>e.course_id===c.id&&e.students).sort((a,b)=>a.students.display_name.localeCompare(b.students.display_name));
     return h('section',{class:'card'},h('h2',null,c.name),h('p',{class:'sub'},c.level+' · '+studs.length+' studenti'),
@@ -798,9 +797,9 @@ async function teacherHome(){
         h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
       h('div',{class:'row'},
         h('button',{class:'primary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
-        h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
+        h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=prompt('Link Zoom del corso (lascia vuoto per cancellarlo)',c.zoom_url||'');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);alert(error?'Non salvato: '+error.message:'Link salvato.');teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
   });
-  mount(header(out),h('h1',null,'Area docenti'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),footer());
+  mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),tTabs('corsi'),footer());
 }
 
 
@@ -889,6 +888,130 @@ async function teacherWhiteboards(c){
   mount(topbar('Lavagne · '+c.name,back),
     h('div',{class:'card'},h('h3',null,'Carica una lavagna'),h('p',{class:'sub small'},'Foto/screenshot o PDF (max 20 MB). Gli alunni del corso la vedono subito nella sezione Lavagne, sotto il numero di lezione indicato.'),num,ttl,file,up,msg),
     groups.length?groups:h('p',{class:'sub'},'Ancora nessuna lavagna caricata.'),footer());
+}
+
+
+/* ---------- docente: shell, calendario ---------- */
+function tDrawer(){
+  const close=()=>ov.remove();
+  const it=(em,l,fn)=>h('button',{class:'dr-item',onclick:()=>{close();fn()}},h('span',{class:'dr-em','aria-hidden':'true'},em),l);
+  const panel=h('div',{class:'dr-panel',role:'dialog','aria-label':'Menu'},
+    h('p',{class:'dr-title'},'Esmet Academy · docenti'),
+    it('📅','Calendario',()=>teacherCal()),it('👥','Corsi e alunni',()=>teacherHome()),
+    it('🚪','Esci',async()=>{await sb.auth.signOut();teacherLogin()}),
+    h('p',{class:'dr-ver'},'Ver '+CFG.version));
+  const ov=h('div',{class:'dr-ov',onclick:e=>{if(e.target===ov)close()}},panel);document.body.append(ov);
+}
+function tHeader(){
+  return h('div',{class:'thead2'},h('div',{class:'thead-top'},
+    h('img',{class:'logo-sm',src:'icons/logo.png',alt:'Esmet Academy'}),
+    h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:tDrawer},ico('menu'))));
+}
+function tTabs(active){
+  const t=(id,label,em,fn)=>h('button',{class:'tab'+(active===id?' on':''),onclick:fn},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
+  return h('nav',{class:'tabbar'},t('cal','Calendario','📅',()=>teacherCal()),t('corsi','Corsi','👥',()=>teacherHome()));
+}
+const turnoL=s=>s==='morning'?' · mattina':s==='evening'?' · sera':'';
+async function teacherCal(weekStart){
+  const mon=weekStart?mondayOf(weekStart):mondayOf(new Date());
+  const sun=new Date(mon);sun.setDate(sun.getDate()+6);
+  const label=mon.getDate()+' '+MESI[mon.getMonth()].slice(0,3).toLowerCase()+' – '+sun.getDate()+' '+MESI[sun.getMonth()].slice(0,3).toLowerCase()+' '+sun.getFullYear();
+  const shift=n=>{const d=new Date(mon);d.setDate(d.getDate()+7*n);teacherCal(d)};
+  const nav=h('div',{class:'row'},
+    h('button',{class:'icon-btn','aria-label':'Settimana precedente',onclick:()=>shift(-1)},ico('back')),
+    h('strong',{class:'weeklab'},label),
+    h('button',{class:'icon-btn','aria-label':'Settimana successiva',onclick:()=>shift(1),style:'transform:scaleX(-1)'},ico('back')),
+    h('button',{class:'linkbtn small',onclick:()=>teacherCal()},'Oggi'));
+  mount(tHeader(),nav,h('p',{class:'sub'},'Caricamento…'),tTabs('cal'));
+  const [cs,ss]=await Promise.all([
+    sb.from('courses').select('id,school_id,name,kind').eq('active',true).order('name'),
+    sb.from('lesson_sessions').select('id,course_id,section,session_date,start_time,end_time,place,status,session_responses(student_id,response,status,note,students(display_name))').gte('session_date',isoD(mon)).lte('session_date',isoD(sun)).order('session_date').order('start_time')]);
+  if(cs.error||ss.error)return mount(tHeader(),h('p',{class:'err'},'Errore nel caricamento del calendario.'),tTabs('cal'),footer());
+  const cname={};cs.data.forEach(c=>cname[c.id]=c);
+  const addBtn=h('button',{class:'primary',onclick:()=>sessionForm(cs.data,null,mon)},'+ Aggiungi lezione');
+  const todayK=isoD(new Date());
+  const days=[];for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(d.getDate()+i);days.push(d)}
+  const blocks=days.map(d=>{
+    const k=isoD(d);const L=ss.data.filter(x=>x.session_date===k&&cname[x.course_id]);if(!L.length)return null;
+    return h('div',null,h('div',{class:'datepill'+(k===todayK?' today':'')},GIORNI[d.getDay()]+', '+d.getDate()+' '+MESI[d.getMonth()]),
+      L.map(x=>tLessonCard(x,cname[x.course_id],cs.data)));
+  });
+  mount(tHeader(),nav,addBtn,blocks.some(Boolean)?blocks:h('p',{class:'sub'},'Nessuna lezione questa settimana.'),tTabs('cal'),footer());
+}
+function tLessonCard(x,c,courses){
+  const R=x.session_responses||[];
+  const conf=R.filter(r=>r.response==='confirm').length;
+  const mv=R.filter(r=>r.response==='move_request'&&r.status==='open');
+  const body=h('div',{class:'lc-actions',hidden:'hidden'});
+  const msg=h('p',{class:'sub small',role:'status'});
+  body.append(
+    h('button',{class:'primary',onclick:()=>teacherAttendance(c,x.id)},'Presenze'),
+    h('button',{class:'secondary',onclick:()=>sessionForm(courses,x)},'Modifica'),
+    h('button',{class:'secondary',onclick:async()=>{
+      if(!confirm('Eliminare questa lezione? Si cancellano anche presenze e risposte collegate.'))return;
+      const {error}=await sb.from('lesson_sessions').delete().eq('id',x.id);
+      if(error){msg.className='err';msg.textContent='Non eliminata: '+error.message;return}
+      teacherCal(new Date(x.session_date+'T12:00:00'));
+    }},'Elimina'));
+  mv.forEach(r=>{
+    const who=r.students?r.students.display_name:'Alunno';
+    body.append(h('div',{class:'mv'},h('p',{class:'small'},h('strong',null,who+' chiede di spostare'),r.note?': '+r.note:''),
+      h('button',{class:'primary',onclick:()=>sessionForm(courses,x,null,r.student_id)},'Accetta: imposta nuovo orario'),
+      h('button',{class:'secondary',onclick:async()=>{await sb.from('session_responses').update({status:'rejected'}).eq('session_id',x.id).eq('student_id',r.student_id);teacherCal(new Date(x.session_date+'T12:00:00'))}},'Non posso')));
+  });
+  const head=h('button',{class:'lc-head',onclick:()=>{body.hidden=!body.hidden}},
+    h('span',{class:'lc-time'},(x.start_time||'').slice(0,5)+(x.end_time?'–'+x.end_time.slice(0,5):'')),
+    h('span',{class:'lc-main'},h('strong',null,c.name),h('span',{class:'sub small'},[x.place,turnoL(x.section).replace(' · ','')].filter(Boolean).join(' · '))),
+    conf?h('span',{class:'pill g'},conf+' conferm'+(conf===1?'ata':'ate')):null,
+    mv.length?h('span',{class:'pill n'},'spostamento'):null);
+  return h('div',{class:'card lc'},head,body,msg);
+}
+function sessionForm(courses,x,weekMon,acceptStudent){
+  const back=()=>teacherCal(x?new Date(x.session_date+'T12:00:00'):weekMon);
+  const edit=!!x;
+  const course=h('select',{class:'txt sel','aria-label':'Corso'},courses.map(c=>h('option',{value:c.id,selected:x&&x.course_id===c.id},c.name)));
+  const date=h('input',{class:'txt',type:'date',value:x?x.session_date:isoD(new Date())});
+  const st=h('input',{class:'txt',type:'time',value:x&&x.start_time?x.start_time.slice(0,5):''});
+  const en=h('input',{class:'txt',type:'time',value:x&&x.end_time?x.end_time.slice(0,5):''});
+  const sec=h('select',{class:'txt sel','aria-label':'Turno'},[['','Nessun turno'],['morning','Mattina'],['evening','Sera']].map(([v,t])=>h('option',{value:v,selected:(x&&x.section||'')===v},t)));
+  const place=h('input',{class:'txt',type:'text',placeholder:'Dove (es. Online)',value:x?(x.place||''):'Online',maxlength:'80'});
+  const weeks=h('input',{class:'txt',type:'number',min:'1',max:'52',value:'1'});
+  const dayNames=['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
+  const dchk=dayNames.map((n,i)=>{const cb=h('input',{type:'checkbox'});return {cb,i,el:h('label',{class:'att-chk'},cb,n)}});
+  const syncDay=()=>{const wd=(parse0(date.value).getDay()+6)%7;dchk.forEach(d=>d.cb.checked=(d.i===wd))};
+  function parse0(s){const p=s.split('-').map(Number);return new Date(p[0],p[1]-1,p[2])}
+  date.addEventListener('change',syncDay);syncDay();
+  const err=h('p',{class:'err',role:'alert'});
+  const save=h('button',{class:'primary',onclick:async()=>{
+    err.textContent='';
+    if(!date.value||!st.value){err.textContent='Inserisci data e ora di inizio.';return}
+    if(en.value&&en.value<=st.value){err.textContent='La fine deve essere dopo l’inizio.';return}
+    const c=courses.find(k=>k.id===course.value);
+    const dur=en.value?(parseInt(en.value.slice(0,2))*60+parseInt(en.value.slice(3))-(parseInt(st.value.slice(0,2))*60+parseInt(st.value.slice(3)))):60;
+    const base={start_time:st.value,end_time:en.value||null,place:place.value.trim()||null,duration_min:dur,section:sec.value};
+    save.disabled=true;let error=null;
+    if(edit){
+      ({error}=await sb.from('lesson_sessions').update({...base,session_date:date.value,course_id:course.value}).eq('id',x.id));
+      if(!error&&acceptStudent)await sb.from('session_responses').update({status:'accepted'}).eq('session_id',x.id).eq('student_id',acceptStudent);
+    }else{
+      const n=Math.max(1,Math.min(52,parseInt(weeks.value,10)||1));
+      const d0=parse0(date.value);const mon0=new Date(d0);mon0.setDate(mon0.getDate()-((mon0.getDay()+6)%7));
+      const rows=[];
+      for(let w=0;w<n;w++)dchk.filter(d=>d.cb.checked).forEach(d=>{const dd=new Date(mon0);dd.setDate(dd.getDate()+7*w+d.i);if(dd>=d0)rows.push({...base,school_id:c.school_id,course_id:course.value,session_date:isoD(dd),kind:'regular',status:'scheduled'})});
+      if(!rows.length){err.textContent='Scegli almeno un giorno.';save.disabled=false;return}
+      ({error}=await sb.from('lesson_sessions').upsert(rows,{onConflict:'course_id,section,session_date,kind',ignoreDuplicates:true}));
+    }
+    if(error){err.textContent='Non salvato: '+error.message;save.disabled=false;return}
+    teacherCal(parse0(date.value));
+  }},edit?'Salva modifiche':'Salva');
+  mount(topbar(edit?'Modifica lezione':'Nuova lezione',back),
+    h('div',{class:'card'},
+      acceptStudent?h('p',{class:'sub small'},'Imposta il nuovo orario: salvando, la richiesta risulta accettata.'):null,
+      h('label',null,'Corso',course),h('label',null,'Data',date),
+      h('div',{class:'row'},h('label',null,'Inizio',st),h('label',null,'Fine',en)),
+      h('label',null,'Turno (solo per i corsi di gruppo)',sec),h('label',null,'Dove',place),
+      edit?null:h('div',null,h('p',{class:'sub small'},'Ripeti nei giorni (a partire dalla data scelta):'),h('div',{class:'row'},dchk.map(d=>d.el)),h('label',null,'Per quante settimane (compresa la prima)',weeks)),
+      save,err),footer());
 }
 
 /* --- sblocco lezioni per gruppo di alunni --- */

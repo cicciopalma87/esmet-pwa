@@ -140,3 +140,5 @@ label.chk{flex-direction:row;color:var(--ink)}
 .att-name{grid-column:1/-1;font-weight:600}
 .att-row .sel{grid-column:1/-1}
 .att-chk{display:inline-flex;gap:6px;align-items:center;font-size:.85rem}.att-chk input{width:18px;height:18px}
+
+.mv{width:100%;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:8px}
