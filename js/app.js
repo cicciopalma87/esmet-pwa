@@ -1123,8 +1123,10 @@ async function teacherAttendance(c,sid){
     sb.from('attendance').select('student_id,status,camera_off,mic_off').eq('session_id',def),
     sb.from('session_responses').select('student_id,response,status,note').eq('session_id',def)]);
   if(en.error||at.error)return mount(topbar('Presenze',back),h('p',{class:'err'},'Errore nel caricamento.'));
-  const roster=en.data.filter(e=>e.students&&(!e.section||!cur.section||e.section===cur.section)).sort((a,b)=>a.students.display_name.localeCompare(b.students.display_name));
+  const roster=en.data.filter(e=>e.students&&(!e.section||!cur.section||e.section===cur.section));
   const A={};at.data.forEach(r=>A[r.student_id]=r);const R={};(rs.data||[]).forEach(r=>R[r.student_id]=r);
+  const rank=e=>{const a=A[e.students.id],r=R[e.students.id];return a&&a.status==='present'?0:(r&&r.response==='confirm')?1:a&&a.status?2:3};
+  roster.sort((a,b)=>rank(a)-rank(b)||a.students.display_name.localeCompare(b.students.display_name));
   const conf=Object.values(R).filter(r=>r.response==='confirm').length;
   const moves=Object.values(R).filter(r=>r.response==='move_request');
   const ctl={};
