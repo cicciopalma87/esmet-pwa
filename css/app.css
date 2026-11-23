@@ -172,3 +172,7 @@ label.chk{flex-direction:row;color:var(--ink)}
 .mnum{font-weight:700;font-size:13px}
 .mline{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--accent,#0b57d0);color:#fff;border-radius:4px;padding:1px 3px;font-size:9.5px}
 .mmore{font-size:10px;color:var(--muted,#666);font-weight:700}
+.opts{display:flex;flex-direction:column;gap:6px;margin:4px 0}
+.opt{text-align:left;border:1px solid var(--line,#0002);background:var(--surface,#fff);border-radius:12px;padding:10px 12px;font:inherit;cursor:pointer;color:inherit}
+.opt.on{border:2px solid var(--accent,#0b57d0);background:var(--sand,#efe9df);font-weight:700}
+.xbtn{border:0;background:none;color:#fff;font-weight:700;cursor:pointer;padding:0 0 0 4px}

@@ -1001,7 +1001,7 @@ const KL={group:'Gruppo',individual:'Individuale',conversation:'Conversazione'};
 const LEVELS=['A1','A2','B1','B2','C1','C2'];
 function shortName(c,noT){
   const lg=c.language&&c.language!=='Tedesco'?c.language+' · ':'';
-  const t=(!noT&&c.teacher)?' - '+c.teacher:'';
+  const t=noT?'':' - '+(c.teacher||'Nessun docente');
   if(c.kind==='individual'){const m=/individuale\s+(.+)$/i.exec(c.name);return lg+'Ind. '+(m?m[1]:c.name)+t}
   return lg+c.level+(c.kind==='group'?' Gruppo':' Conv.')+t;
 }
@@ -1012,29 +1012,29 @@ function classPicker(o){
   o=o||{};
   const kinds=o.noIndividual?['group','conversation']:['group','individual','conversation'];
   const lg=selEl(LANGS.map(x=>[x,x]),'Tedesco','Lingua');
-  const dc=selEl([],'','Docente');
+  const dc=selEl([],'__','Docente');
   const kd=selEl(kinds.map(k=>[k,KL[k]]),'group','Tipo di corso');
   const lv=selEl(LEVELS.map(x=>[x,x]),'A1','Livello');
   const info=h('p',{class:'sub small',role:'status'});
   const fillT=()=>{
     const all=A.staff.staff.filter(p=>p.role==='teacher'&&!p.blocked);
     let ts=all.filter(p=>(p.languages||[]).includes(lg.value));if(!ts.length)ts=all;
-    const cur=dc.value;dc.replaceChildren(...[['','— scegli il docente —'],...ts.map(p=>[p.id,p.name])].map(o=>h('option',{value:o[0]},o[1])));
-    dc.value=ts.some(p=>p.id===cur)?cur:'';
+    const cur=dc.value;dc.replaceChildren(...[['__','— scegli il docente —'],['','Nessun docente (per ora)'],...ts.map(p=>[p.id,p.name])].map(o=>h('option',{value:o[0]},o[1])));
+    dc.value=(cur===''||ts.some(p=>p.id===cur))?cur:'__';
   };
-  const get=()=>({language:lg.value,teacher:dc.value,kind:kd.value,level:lv.value});
+  const get=()=>({language:lg.value,teacher:dc.value==='__'?undefined:(dc.value||null),kind:kd.value,level:lv.value});
   const upd=()=>{
     fillT();
     const sel=get();
     if(o.getName&&sel.kind==='individual'&&false){}
     lv.disabled=false;
-    if(!sel.teacher){info.textContent='';return}
+    if(sel.teacher===undefined){info.textContent='';return}
     const nm=o.getName?o.getName():'';
     const ex=findCourse(sel,nm);
     info.className='sub small';info.textContent=ex?'Classe esistente: '+shortName(ex):'Nuova classe: '+courseTitle(sel,nm)+' (verrà creata)';
   };
   [lg,dc,kd,lv].forEach(e=>e.addEventListener('change',upd));
-  lg.addEventListener('change',()=>{dc.value=''});
+  lg.addEventListener('change',()=>{dc.value='__'});
   upd();
   return {node:h('div',{class:'picker'},lab('Lingua'),lg,lab('Docente'),dc,lab('Tipo di corso'),kd,lab('Livello'),lv,info),get,refresh:upd};
 }
@@ -1042,14 +1042,14 @@ function courseTitle(sel,nm){
   return sel.kind==='individual'?sel.language+' - corso individuale '+(nm||'…'):sel.kind==='group'?sel.language+' '+sel.level+' - gruppo':sel.language+' '+sel.level+' - conversazione';
 }
 function findCourse(sel,nm){
-  return A.ov.courses.find(c=>c.language===sel.language&&c.teacher_id===sel.teacher&&c.kind===sel.kind&&
+  return A.ov.courses.find(c=>c.language===sel.language&&(c.teacher_id||null)===sel.teacher&&c.kind===sel.kind&&
     (sel.kind==='individual'?norm(c.name).includes(norm(nm)):c.level===sel.level));
 }
 async function resolveCourse(sel,nm){
   const ex=findCourse(sel,nm);if(ex)return ex.id;
-  const {data,error}=await sb.rpc('admin_create_course',{p_name:courseTitle(sel,nm),p_level:sel.level,p_kind:sel.kind,p_teacher:sel.teacher,p_language:sel.language});
+  const {data,error}=await sb.rpc('admin_create_course',{p_name:courseTitle(sel,nm),p_level:sel.level,p_kind:sel.kind,p_teacher:sel.teacher||null,p_language:sel.language});
   if(error)throw error;
-  A.ov.courses.push({id:data,name:courseTitle(sel,nm),level:sel.level,kind:sel.kind,teacher_id:sel.teacher,language:sel.language,teacher:(A.staff.staff.find(p=>p.id===sel.teacher)||{}).name});
+  A.ov.courses.push({id:data,name:courseTitle(sel,nm),level:sel.level,kind:sel.kind,teacher_id:sel.teacher,language:sel.language,teacher:(A.staff.staff.find(p=>p.id===sel.teacher)||{}).name||null});
   return data;
 }
 function inviteText(name,code){
@@ -1100,7 +1100,7 @@ async function newStudent(){
     h('button',{class:'secondary',onclick:()=>close(null)},'Annulla'),
     h('button',{class:'primary',onclick:()=>{
       if(!nm.value.trim()){err.textContent='Inserisci nome e cognome.';return}
-      if(use.checked&&!pk.get().teacher){err.textContent='Scegli il docente.';return}
+      if(use.checked&&pk.get().teacher===undefined){err.textContent='Scegli il docente (o "Nessun docente").';return}
       close({n:nm.value.trim(),use:use.checked,sel:pk.get()})}},'Crea')]);
   if(!v)return;
   try{
@@ -1121,7 +1121,7 @@ async function assignDlg(mode){
   const nodes=mode==='move'?[lab('Dalla classe'),from,h('hr'),h('p',{class:'sub small'},'Nella nuova classe:'),pk.node,err]:[h('p',{class:'sub small'},studs.length+' alunni da aggiungere a:'),pk.node,err];
   const ok=await dlg(mode==='move'?'Sposta alunni':'Assegna a una classe',nodes,close=>[
     h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),
-    h('button',{class:'primary',onclick:()=>{if(!pk.get().teacher){err.textContent='Scegli il docente.';return}close(true)}},'Conferma')]);
+    h('button',{class:'primary',onclick:()=>{if(pk.get().teacher===undefined){err.textContent='Scegli il docente (o "Nessun docente").';return}close(true)}},'Conferma')]);
   if(!ok)return;
   const sel=pk.get();
   try{
@@ -1166,7 +1166,7 @@ async function changeTeacher(c){
 async function newClass(){
   const pk=classPicker({noIndividual:true});
   const err=h('p',{class:'err',role:'alert'});
-  const ok=await dlg('Nuova classe',[pk.node,h('p',{class:'sub small'},'I corsi individuali si creano da soli quando inserisci o sposti un alunno.'),err],close=>[h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),h('button',{class:'primary',onclick:()=>{if(!pk.get().teacher){err.textContent='Scegli il docente.';return}close(true)}},'Crea')]);
+  const ok=await dlg('Nuova classe',[pk.node,h('p',{class:'sub small'},'I corsi individuali si creano da soli quando inserisci o sposti un alunno.'),err],close=>[h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),h('button',{class:'primary',onclick:()=>{if(pk.get().teacher===undefined){err.textContent='Scegli il docente (o "Nessun docente").';return}close(true)}},'Crea')]);
   if(!ok)return;
   try{if(findCourse(pk.get(),''))return say('Già esistente','Questa classe esiste già.');await resolveCourse(pk.get(),'')}catch(e){return say('Errore',e.message||String(e))}
   adminHome('classi');
@@ -1196,24 +1196,67 @@ async function inviteMsg(email,name){
     h('button',{class:'primary',onclick:async()=>{try{await navigator.clipboard.writeText(txt);msg.textContent='Copiato.'}catch(e){msg.textContent='Seleziona e copia il testo.'}}},'Copia')]);
 }
 async function inviteDlg(p){
+  const edit=!!p;
   const em=h('input',{class:'txt',type:'email',placeholder:'Email del docente',value:p?p.email:'',readonly:p?true:null});
   const nm=h('input',{class:'txt',type:'text',placeholder:'Nome e cognome',value:p?p.name:''});
   const lgs=LANGS.map(l=>{const c=h('input',{type:'checkbox'});c.checked=p?(p.languages||[]).includes(l):l==='Tedesco';return [l,c]});
-  const mine=p?p.courses.map(c=>c.id):[];
-  const crs=A.ov.courses.map(c=>{const c2=h('input',{type:'checkbox'});c2.checked=mine.includes(c.id);return [c.id,shortName(c,true)+(c.teacher&&!mine.includes(c.id)?' (ora: '+c.teacher+')':''),c2]});
-  const err=h('p',{class:'err',role:'alert'});
-  const v=await dlg(p?'Modifica docente':'Invita docente',[em,nm,h('p',{class:'sub small'},'Lingue insegnate:'),
-    ...lgs.map(([l,c])=>h('label',{class:'chk-row'},c,l)),h('p',{class:'sub small'},'Classi assegnate:'),
-    ...crs.map(([id,n,c])=>h('label',{class:'chk-row'},c,n)),err],close=>[
-    h('button',{class:'secondary',onclick:()=>close(null)},'Annulla'),
-    h('button',{class:'primary',onclick:()=>{if(!/.+@.+\..+/.test(em.value)){err.textContent='Inserisci una email valida.';return}close(true)}},'Salva')]);
+  const keep=new Set(p?p.courses.map(c=>c.id):[]);
+  const before=new Set(keep);
+  const kd=selEl(['group','conversation','individual'].map(k=>[k,KL[k]]),'group','Tipo di corso');
+  const lv=selEl(LEVELS.map(x=>[x,x]),'A1','Livello');
+  const mineBox=h('div');const listBox=h('div',{class:'opts'});const warn=h('p',{class:'err',role:'alert'});const err=h('p',{class:'err',role:'alert'});
+  const btnWrap=h('div',{class:'row',style:'flex-wrap:wrap;gap:8px;justify-content:flex-end'});
+  let chosen=null,closeFn=null;
+  const langs=()=>lgs.filter(x=>x[1].checked).map(x=>x[0]);
+  const drawMine=()=>{
+    mineBox.replaceChildren(...(edit?[lab('Classi attuali'),...(keep.size?[...keep].map(id=>h('span',{class:'ctag'},courseName(id,true),' ',h('button',{class:'xbtn','aria-label':'Togli classe',onclick:()=>{keep.delete(id);drawMine()}},'✕'))):[h('p',{class:'sub small'},'Nessuna classe assegnata')])]:[]));
+  };
+  const drawList=()=>{
+    const L=A.ov.courses.filter(c=>langs().includes(c.language)&&c.kind===kd.value&&(c.kind==='individual'||c.level===lv.value)&&!keep.has(c.id));
+    if(chosen&&!L.some(c=>c.id===chosen.id))chosen=null;
+    listBox.replaceChildren(...(L.length?L.map(c=>h('button',{class:'opt'+(chosen&&chosen.id===c.id?' on':''),onclick:()=>{chosen=(chosen&&chosen.id===c.id)?null:c;drawList()}},shortName(c))):[h('p',{class:'sub small'},'Nessuna classe di questo tipo e livello.')]));
+    warn.textContent=chosen&&chosen.teacher_id&&chosen.teacher_id!==(p&&p.id)?'Attenzione: questo corso è già assegnato a '+chosen.teacher+'.':'';
+    drawBtns();
+  };
+  const drawBtns=()=>{
+    const b=(t,cls,fn,dis)=>h('button',{class:cls,disabled:dis?true:null,onclick:fn},t);
+    btnWrap.replaceChildren(
+      b('Annulla','secondary',()=>closeFn(null)),
+      b(edit?'Salva':'Crea docente','primary',()=>go('plain')),
+      chosen?b(edit?'Salva e assegna questo corso':'Crea docente ed assegna questo corso','primary',()=>go('assign'))
+            :b(edit?'Salva e nuova classe':'Crea docente e nuova classe','primary',()=>go('new'),kd.value==='individual'));
+  };
+  const go=async mode=>{
+    err.textContent='';
+    if(!/.+@.+\..+/.test(em.value)){err.textContent='Inserisci una email valida.';return}
+    if(!nm.value.trim()){err.textContent='Inserisci nome e cognome.';return}
+    if(!langs().length){err.textContent='Scegli almeno una lingua.';return}
+    if(mode==='assign'&&chosen.teacher_id&&chosen.teacher_id!==(p&&p.id)){
+      const ok=await dlg('Corso già assegnato',[h('p',{class:'sub'},'Il corso è già assegnato a '+chosen.teacher+'. Vuoi procedere comunque?')],close=>[h('button',{class:'secondary',onclick:()=>close(false)},'No'),h('button',{class:'primary',onclick:()=>close(true)},'Sì')]);
+      if(!ok)return;
+    }
+    closeFn({mode});
+  };
+  [kd,lv].forEach(e=>e.addEventListener('change',drawList));
+  lgs.forEach(([l,c])=>c.addEventListener('change',drawList));
+  drawMine();drawList();
+  const v=await dlg(edit?'Modifica docente':'Invita docente',[em,nm,lab('Lingue insegnate'),...lgs.map(([l,c])=>h('label',{class:'chk-row'},c,l)),
+    mineBox,h('hr'),lab('Assegna una classe (facoltativo)'),kd,lv,lab('Classi già presenti'),listBox,warn,err],close=>{closeFn=close;return [btnWrap]});
   if(!v)return;
-  const {error}=await sb.rpc('admin_invite_staff',{p_email:em.value,p_full_name:nm.value,p_role:'teacher',p_languages:lgs.filter(x=>x[1].checked).map(x=>x[0]),p_course_ids:crs.filter(x=>x[2].checked).map(x=>x[0])});
-  if(error)return say('Errore',error.message);
-  if(!p)await inviteMsg(em.value.trim().toLowerCase(),nm.value);
+  try{
+    const ids=new Set(keep);
+    if(v.mode==='assign')ids.add(chosen.id);
+    if(v.mode==='new'){
+      const lg0=langs()[0];
+      ids.add(await resolveCourse({language:lg0,teacher:null,kind:kd.value,level:lv.value},''));
+    }
+    const {error}=await sb.rpc('admin_invite_staff',{p_email:em.value,p_full_name:nm.value,p_role:'teacher',p_languages:langs(),p_course_ids:[...ids]});
+    if(error)throw error;
+    if(edit)for(const id of before)if(!ids.has(id)){const r=await sb.rpc('admin_set_course_teacher',{p_course:id,p_teacher:null});if(r.error)throw r.error}
+  }catch(e){return say('Errore',e.message||String(e))}
+  if(!edit)await inviteMsg(em.value.trim().toLowerCase(),nm.value);
   adminHome('docenti');
 }
-
 
 /* calendario amministratore: mese a quadrati → giorno → presenze */
 const WD=['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
