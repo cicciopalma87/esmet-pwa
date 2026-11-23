@@ -60,6 +60,34 @@ async function submitResult(lesson,idx,res){
   LS.set('esmet_log_'+lesson.id,log);
 }
 
+
+/* ---------- finestre di dialogo dell'app (al posto di prompt/confirm/alert) ---------- */
+function dlg(title,bodyNodes,buttons){
+  return new Promise(res=>{
+    const close=v=>{ov.remove();res(v)};
+    const ov=h('div',{class:'dlg-ov',onclick:e=>{if(e.target===ov)close(null)}},
+      h('div',{class:'dlg',role:'dialog','aria-modal':'true','aria-label':title},
+        h('h3',null,title),...bodyNodes,
+        h('div',{class:'row dlg-btn'},...buttons(close))));
+    document.body.append(ov);
+    const f=ov.querySelector('input,textarea');if(f)f.focus();
+  });
+}
+function askText(title,label,value,okLabel){
+  const inp=h('input',{class:'txt',type:'text',value:value||'','aria-label':label});
+  return dlg(title,[label?h('p',{class:'sub small'},label):null,inp].filter(Boolean),close=>[
+    h('button',{class:'secondary',onclick:()=>close(null)},'Annulla'),
+    h('button',{class:'primary',onclick:()=>close(inp.value)},okLabel||'Ok')]);
+}
+function askYes(title,text,okLabel){
+  return dlg(title,[h('p',{class:'sub'},text)],close=>[
+    h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),
+    h('button',{class:'primary',onclick:()=>close(true)},okLabel||'Conferma')]).then(v=>v===true);
+}
+function say(title,text){
+  return dlg(title,[h('p',{class:'sub'},text)],close=>[h('button',{class:'primary',onclick:()=>close(true)},'Ok')]);
+}
+
 /* ---------- entry ---------- */
 async function start(){
   if(location.hash==='#docente'){return teacherEntry()}
@@ -376,7 +404,7 @@ function lessonCard(x){
     body.append(...[
       h('button',{class:'primary',onclick:()=>send('confirm')},'Confermo'),
       h('button',{class:'secondary',onclick:()=>absenceView({course_id:x.course_id,date:x.date})},'Sarò assente'),
-      x.individual?h('button',{class:'secondary',onclick:()=>{const n=prompt('Quando preferiresti spostarla? (giorno e ora)','');if(n===null)return;send('move_request',n)}},'Chiedi di spostare'):null].filter(Boolean));
+      x.individual?h('button',{class:'secondary',onclick:async()=>{const n=await askText('Chiedi di spostare','Quando preferiresti spostarla? (giorno e ora)','','Invia richiesta');if(n===null)return;send('move_request',n)}},'Chiedi di spostare'):null].filter(Boolean));
   }
   const head=h('button',{class:'lc-head',onclick:()=>{if(!past)body.hidden=!body.hidden},'aria-expanded':'false'},
     h('span',{class:'lc-time'},x.start+(x.end?'–'+x.end:'')),
@@ -464,7 +492,7 @@ async function registroView(filter){
     const note=h('p',{class:'sub small',role:'status'});
     const rep=r.reported?h('span',{class:'sub small'},'Segnalazione inviata'):
       h('button',{class:'linkbtn small',onclick:async ev=>{
-        const n=prompt('Cosa non torna? (facoltativo)','');if(n===null)return;
+        const n=await askText('Segnala un problema','Cosa non torna? (facoltativo)','','Invia');if(n===null)return;
         const {error}=await sb.rpc('student_report_attendance',{p_code:S.code,p_session:r.session_id,p_note:n});
         if(error)note.textContent='Non sono riuscito a inviare. Riprova.';
         else{ev.target.replaceWith(h('span',{class:'sub small'},'Segnalazione inviata'))}
@@ -796,7 +824,7 @@ async function teacherHome(){
         h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
       h('div',{class:'row'},
         h('button',{class:'primary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
-        h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=prompt('Link Zoom del corso (lascia vuoto per cancellarlo)',c.zoom_url||'');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);alert(error?'Non salvato: '+error.message:'Link salvato.');teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
+        h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link Zoom del corso','Incolla il link (lascia vuoto per cancellarlo)',c.zoom_url||'','Salva');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
   });
   mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),tTabs('corsi'),footer());
 }
@@ -882,7 +910,7 @@ async function teacherWhiteboards(c){
   const groups=Object.keys(byN).sort((a,b)=>b-a).map(n=>h('div',{class:'card'},h('h3',null,'Lezione '+n),
     h('div',{class:'wb-grid'},byN[n].map(w=>h('div',{class:'wb-cell'},wbThumb(w,()=>wbPreview(w)),
       h('button',{class:'linkbtn small',onclick:async()=>{
-        if(!confirm('Eliminare questa lavagna? Gli alunni non la vedranno più.'))return;
+        if(!await askYes('Eliminare la lavagna?','Gli alunni non la vedranno più.','Elimina'))return;
         await sb.from('whiteboards').delete().eq('id',w.id);await sb.storage.from('lavagne').remove([w.path]);teacherWhiteboards(c)}},'Elimina'))))));
   mount(topbar('Lavagne · '+c.name,back),
     h('div',{class:'card'},h('h3',null,'Carica una lavagna'),h('p',{class:'sub small'},'Foto/screenshot o PDF (max 20 MB). Gli alunni del corso la vedono subito nella sezione Lavagne, sotto il numero di lezione indicato.'),num,ttl,file,up,msg),
@@ -947,7 +975,7 @@ function tLessonCard(x,c,courses){
     h('button',{class:'primary',onclick:()=>teacherAttendance(c,x.id)},'Presenze'),
     h('button',{class:'secondary',onclick:()=>sessionForm(courses,x)},'Modifica'),
     h('button',{class:'secondary',onclick:async()=>{
-      if(!confirm('Eliminare questa lezione? Si cancellano anche presenze e risposte collegate.'))return;
+      if(!await askYes('Eliminare la lezione?','Si cancellano anche presenze e risposte collegate.','Elimina'))return;
       const {error}=await sb.from('lesson_sessions').delete().eq('id',x.id);
       if(error){msg.className='err';msg.textContent='Non eliminata: '+error.message;return}
       teacherCal(new Date(x.session_date+'T12:00:00'));
