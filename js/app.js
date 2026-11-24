@@ -1283,8 +1283,13 @@ async function studentDetail(id){
   const bd=h('input',{class:'txt',type:'date',value:s.birth||''});
   const ac=selEl([['1','Attivo'],['0','Non attivo (non può più entrare, lo storico resta)']],s.active?'1':'0','Stato');
   const nt=h('textarea',{class:'txt',rows:'4',maxlength:'2000',placeholder:'Note interne (visibili solo all’amministrazione)'});nt.value=s.notes||'';
-  const storico=s.courses.length?s.courses.map(c=>h('div',{class:'card'},h('strong',null,courseName(c.course_id)),
-    h('p',{class:'sub small'},'Dal '+fmtDate(c.since).slice(0,10)+' · presenze '+c.present+' · assenze '+c.absent+(c.takes_exam?'':' · non sostiene l’esame')))):[h('p',{class:'sub small'},'Nessuna classe.')];
+  const starts=[];
+  const storico=s.courses.length?s.courses.map(c=>{
+    const sd=h('input',{class:'txt',type:'date',value:c.start_date||'','aria-label':'In classe dal'});starts.push({course:c.course_id,el:sd,old:c.start_date||''});
+    return h('div',{class:'card'},h('strong',null,courseName(c.course_id)),
+      h('p',{class:'sub small'},'Presenze '+c.present+' · assenze '+c.absent+(c.takes_exam?'':' · non sostiene l’esame')),
+      fld('Compare nell’elenco presenze dal giorno',sd),
+      h('p',{class:'sub small'},'Lascia vuoto per mostrarlo anche nei giorni passati.'))}):[h('p',{class:'sub small'},'Nessuna classe.')];
   const acc=h('div',{class:'card'},h('p',{class:'sub small'},'Codice alunno: ',h('strong',null,s.code)),
     h('p',{class:'sub small'},s.has_account?'Accesso con email: '+(s.email||''):'Non ha ancora creato email e password.'),
     h('p',{class:'sub small'},s.consent_at?'Informativa accettata il '+fmtDate(s.consent_at).slice(0,10):'Informativa non ancora accettata.'),
@@ -1293,7 +1298,7 @@ async function studentDetail(id){
     fld('Nome e cognome',nm),fld('Telefono',ph),fld('Città',ci),fld('Data di nascita',bd),fld('Stato',ac),fld('Note',nt),
     h('h3',null,'Accesso'),acc,h('h3',null,'Storico corsi'),...storico,
     h('h3',null,'Esami'),h('p',{class:'sub small'},'Lo storico degli esami comparirà qui. Esercizi svolti finora: '+s.results+'.')],
-    async()=>{const x=await sb.rpc('admin_update_student',{p_id:id,p_name:nm.value,p_phone:ph.value,p_city:ci.value,p_birth:bd.value||null,p_notes:nt.value,p_active:ac.value==='1'});if(x.error)throw x.error;adminHome('alunni')},
+    async()=>{const x=await sb.rpc('admin_update_student',{p_id:id,p_name:nm.value,p_phone:ph.value,p_city:ci.value,p_birth:bd.value||null,p_notes:nt.value,p_active:ac.value==='1'});if(x.error)throw x.error;for(const t of starts){if(t.el.value!==t.old){const y=await sb.rpc('admin_set_enrollment_start',{p_student:id,p_course:t.course,p_date:t.el.value||null});if(y.error)throw y.error}}adminHome('alunni')},
     async()=>{if(!await confirmDelete(s.name,'Si cancellano anche presenze, risultati degli esercizi e accesso. Se vuoi solo che non entri più, imposta “Non attivo”: lo storico resta.'))return;
       const x=await sb.rpc('admin_delete_student',{p_id:id});if(x.error)return say('Errore',x.error.message);adminHome('alunni')});
 }
@@ -1797,11 +1802,11 @@ async function attDay(c,k,edit){
   if(!sessions.length)return attShell(c,'Presenze · '+shortName(c,true),back,head,h('p',{class:'sub'},'Nessuna lezione in questo giorno.'));
   const ids=sessions.map(x=>x.id);
   const [en,at,rs]=await Promise.all([
-    sb.from('enrollments').select('section,students(id,display_name)').eq('course_id',c.id),
+    sb.from('enrollments').select('section,start_date,students(id,display_name)').eq('course_id',c.id),
     sb.from('attendance').select('session_id,student_id,status,camera_off,mic_off,teacher_note').in('session_id',ids),
     sb.from('session_responses').select('session_id,student_id,response,status,note').in('session_id',ids)]);
   if(en.error||at.error)return attShell(c,'Presenze',back,head,h('p',{class:'err'},'Errore nel caricamento.'));
-  const roster=en.data.filter(e=>e.students&&(!e.section||sessions.some(s=>!s.section||s.section===e.section)));
+  const roster=en.data.filter(e=>e.students&&(!e.section||sessions.some(s=>!s.section||s.section===e.section))&&(!e.start_date||e.start_date<=k||at.data.some(r=>r.student_id===e.students.id)));
   const multi=sessions.length>1;
   const byS={};at.data.forEach(r=>(byS[r.student_id]=byS[r.student_id]||[]).push(r));
   const R={};(rs.data||[]).forEach(r=>{if(!R[r.student_id]||r.response==='confirm')R[r.student_id]=r});
