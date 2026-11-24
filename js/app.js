@@ -296,7 +296,7 @@ function drawer(){
   document.body.append(ov);
 }
 function courseSwitch(){
-  const rows=S.me.courses.map(c=>h('button',{class:'row-item',onclick:()=>{S.cid=c.id;homeView()}},h('span',{class:'ri-l'},ico('book'),c.name),ico('chev')));
+  const rows=S.me.courses.map(c=>h('button',{class:'row-item',onclick:()=>{S.cid=c.id;homeView()}},h('span',{class:'ri-l'},ico('book'),h('span',null,c.name,c.teacher?h('span',{class:'sub small',style:'display:block'},'Docente: '+c.teacher):null)),ico('chev')));
   mount(topbar('Cambia corso',()=>homeView()),h('div',{class:'rows'},rows),footer());
 }
 function topbar(title,back){
@@ -347,6 +347,7 @@ function homeView(offline){
   });
   mount(tabHeader(),
     offline?h('p',{class:'sub small'},'Sei offline: vedi l’ultima versione scaricata.'):null,
+    c.teacher?h('p',{class:'sub small'},c.name+' · Docente: '+c.teacher):null,
     join,joinMsg,
     accountBanner(),
     h('h3',{class:'sect'},'Lezioni'),
@@ -416,7 +417,7 @@ function lessonCard(x){
   }
   const head=h('button',{class:'lc-head',onclick:()=>{if(!past)body.hidden=!body.hidden},'aria-expanded':'false'},
     h('span',{class:'lc-time'},x.start+(x.end?'–'+x.end:'')),
-    h('span',{class:'lc-main'},h('strong',null,x.course),x.place?h('span',{class:'sub small'},x.place+(x.section==='morning'?' · mattina':x.section==='evening'?' · sera':'')):(x.section==='morning'?h('span',{class:'sub small'},'mattina'):x.section==='evening'?h('span',{class:'sub small'},'sera'):null)),
+    h('span',{class:'lc-main'},h('strong',null,x.course),x.teacher?h('span',{class:'sub small'},'Docente: '+x.teacher):null,x.place?h('span',{class:'sub small'},x.place+(x.section==='morning'?' · mattina':x.section==='evening'?' · sera':'')):(x.section==='morning'?h('span',{class:'sub small'},'mattina'):x.section==='evening'?h('span',{class:'sub small'},'sera'):null)),
     st?h('span',{class:'pill '+st[1]},st[0]):null);
   return h('div',{class:'card lc'},head,body,msg);
 }
