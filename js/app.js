@@ -1472,7 +1472,7 @@ function tDrawer(){
   const it=(em,l,fn)=>h('button',{class:'dr-item',onclick:()=>{close();fn()}},h('span',{class:'dr-em','aria-hidden':'true'},em),l);
   const panel=h('div',{class:'dr-panel',role:'dialog','aria-label':'Menu'},
     h('p',{class:'dr-title'},'Esmet Academy · docenti'),
-    it('📅','Calendario',()=>teacherCal()),it('👥','Corsi e alunni',()=>teacherHome()),
+    it('📅','Calendario',()=>teacherCal()),it('📋','Registro presenze',()=>teacherRegistro()),it('👥','Corsi e alunni',()=>teacherHome()),
     it('🚪','Esci',async()=>{await sb.auth.signOut();teacherLogin()}),
     h('p',{class:'dr-ver'},'Ver '+CFG.version));
   const ov=h('div',{class:'dr-ov',onclick:e=>{if(e.target===ov)close()}},panel);document.body.append(ov);
@@ -1486,7 +1486,7 @@ function tHeader(){
 function tTabs(active){
   if(isAdm())return aTabs('cal');
   const t=(id,label,em,fn)=>h('button',{class:'tab'+(active===id?' on':''),onclick:fn},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
-  return h('nav',{class:'tabbar'},t('cal','Calendario','📅',()=>teacherCal()),t('corsi','Corsi','👥',()=>teacherHome()));
+  return h('nav',{class:'tabbar'},t('cal','Calendario','📅',()=>teacherCal()),t('reg','Registro','📋',()=>teacherRegistro()),t('corsi','Corsi','👥',()=>teacherHome()));
 }
 const turnoL=s=>s==='morning'?' · mattina':s==='evening'?' · sera':'';
 async function teacherCal(weekStart){
@@ -1776,10 +1776,29 @@ const STL={present:['Presente','g','st-present'],absent:['Assente','b','st-absen
 const d12=k=>new Date(k+'T12:00:00');
 const secL=x=>x.section==='morning'?'Mattina':x.section==='evening'?'Sera':(x.start_time||'').slice(0,5);
 function attShell(c,title,backFn,...rest){
-  return mount(isAdm()?aHeader():topbar(title,backFn),isAdm()?h('div',{class:'row'},h('button',{class:'icon-btn','aria-label':'Indietro',onclick:backFn},ico('back')),h('strong',null,title)):null,...rest,isAdm()?aTabs('cal'):null,footer());
+  let pick=null;
+  if(!isAdm()&&A.tCourses&&A.tCourses.length>1){
+    pick=selEl(A.tCourses.map(x=>[x.id,x.name]),c.id,'Corso');
+    pick.onchange=()=>{const n=A.tCourses.find(x=>x.id===pick.value);if(n){A.regC=n.id;teacherAttendance(n)}};
+  }
+  return mount(isAdm()?aHeader():topbar(title,backFn),isAdm()?h('div',{class:'row'},h('button',{class:'icon-btn','aria-label':'Indietro',onclick:backFn},ico('back')),h('strong',null,title)):pick,...rest,isAdm()?aTabs('cal'):tTabs('reg'),footer());
+}
+async function loadTCourses(){
+  const r=await sb.from('courses').select('id,school_id,name,level,kind,zoom_url,chat_url').eq('active',true).order('name');
+  A.tCourses=r.data||[];return r.error?null:A.tCourses;
+}
+async function teacherRegistro(){
+  if(isAdm())return adminMonth();
+  mount(tHeader(),h('h2',{class:'sect'},'Registro presenze'),h('p',{class:'sub'},'Caricamento…'),tTabs('reg'));
+  const cs=await loadTCourses();
+  if(!cs)return mount(tHeader(),h('p',{class:'err'},'Errore nel caricamento.'),tTabs('reg'),footer());
+  if(!cs.length)return mount(tHeader(),h('h2',{class:'sect'},'Registro presenze'),h('p',{class:'sub'},'Nessun corso assegnato.'),tTabs('reg'),footer());
+  const c=cs.find(x=>x.id===A.regC)||cs[0];A.regC=c.id;
+  return teacherAttendance(c);
 }
 async function teacherAttendance(c,arg){
   // arg: data (YYYY-MM-DD) per aprire direttamente un giorno; sessione non più usata
+  if(!isAdm()&&!A.tCourses)await loadTCourses();
   const k=typeof arg==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(arg)?arg:null;
   if(k)return attDay(c,k);
   return attWeek(c,new Date(),A.attView||'week');
