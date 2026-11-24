@@ -1407,7 +1407,7 @@ function tLessonCard(x,c,courses){
   const body=h('div',{class:'lc-actions',hidden:'hidden'});
   const msg=h('p',{class:'sub small',role:'status'});
   body.append(
-    h('button',{class:'primary',onclick:()=>teacherAttendance(c,x.id)},'Presenze'),
+    h('button',{class:'primary',onclick:()=>teacherAttendance(c,x.session_date)},'Presenze'),
     h('button',{class:'secondary',onclick:()=>sessionForm(courses,x)},'Modifica'),
     h('button',{class:'secondary',onclick:async()=>{
       if(!await askYes('Eliminare la lezione?','Si cancellano anche presenze e risposte collegate.','Elimina'))return;
@@ -1616,10 +1616,11 @@ async function studentSheet(st,c,tab){
     const {data,error}=await sb.from('attendance').select('status,joined_at,reason,note,camera_off,mic_off,teacher_note,lesson_sessions(session_date,course_id)').eq('student_id',st.id);
     if(error)return mount(head,h('p',{class:'err'},'Errore nel caricamento.'));
     const lab={present:['Presente','g'],absent:['Assente','b'],absent_notified:['Assente avvisato','n']};
-    const rows=data.filter(a=>a.lesson_sessions).sort((a,b)=>a.lesson_sessions.session_date<b.lesson_sessions.session_date?1:-1).map(a=>h('tr',null,
+    const seen={};const dd=data.filter(a=>a.lesson_sessions).filter(a=>{const k=a.lesson_sessions.course_id+a.lesson_sessions.session_date;if(seen[k]){if(a.status==='present'&&seen[k].status!=='present'){Object.assign(seen[k],a)}return false}seen[k]=a;return true});
+    const rows=dd.sort((a,b)=>a.lesson_sessions.session_date<b.lesson_sessions.session_date?1:-1).map(a=>h('tr',null,
       h('td',null,a.lesson_sessions.session_date),h('td',null,h('span',{class:'pill '+(lab[a.status]||['','n'])[1]},(lab[a.status]||[a.status])[0])),
       h('td',null,a.joined_at?new Date(a.joined_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):''),h('td',null,[a.reason,a.note].filter(Boolean).join(' · ')),h('td',null,[a.camera_off?'cam spenta':'',a.mic_off?'mic spento':'',a.teacher_note].filter(Boolean).join(' · '))));
-    const pres=data.filter(a=>a.status==='present').length,abs=data.filter(a=>a.status!=='present').length;
+    const pres=dd.filter(a=>a.status==='present').length,abs=dd.filter(a=>a.status!=='present').length;
     return mount(head,h('p',null,'Presenze: ',h('strong',null,pres),' · Assenze: ',h('strong',null,abs)),
       rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Data','Stato','Ingresso','Motivo alunno','Note docente'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'sub'},'Nessuna presenza registrata.'),footer());
   }
@@ -1653,63 +1654,131 @@ async function studentSheet(st,c,tab){
     footer());
 }
 
-async function teacherAttendance(c,sid){
-  const back=()=>teacherHome();
-  mount(topbar('Presenze · '+c.name,back),h('p',{class:'sub'},'Caricamento…'));
-  const ss=await sb.from('lesson_sessions').select('id,session_date,start_time,end_time,section,status').eq('course_id',c.id).order('session_date',{ascending:false}).order('start_time',{ascending:false}).limit(80);
-  if(ss.error)return mount(topbar('Presenze',back),h('p',{class:'err'},'Errore nel caricamento.'));
-  const sessions=ss.data;
-  if(!sessions.length)return mount(topbar('Presenze · '+c.name,back),h('p',{class:'sub'},'Non ci sono ancora lezioni in calendario per questo corso.'),footer());
+/* ---------- presenze: settimana/mese → giorno (compatto, con Modifica) ---------- */
+const STL={present:['Presente','g','st-present'],absent:['Assente','b','st-absent'],absent_notified:['Assente avvisato','n','st-notified']};
+const d12=k=>new Date(k+'T12:00:00');
+const secL=x=>x.section==='morning'?'Mattina':x.section==='evening'?'Sera':(x.start_time||'').slice(0,5);
+function attShell(c,title,backFn,...rest){
+  return mount(isAdm()?aHeader():topbar(title,backFn),isAdm()?h('div',{class:'row'},h('button',{class:'icon-btn','aria-label':'Indietro',onclick:backFn},ico('back')),h('strong',null,title)):null,...rest,isAdm()?aTabs('cal'):null,footer());
+}
+async function teacherAttendance(c,arg){
+  // arg: data (YYYY-MM-DD) per aprire direttamente un giorno; sessione non più usata
+  const k=typeof arg==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(arg)?arg:null;
+  if(k)return attDay(c,k);
+  return attWeek(c,new Date(),A.attView||'week');
+}
+async function attWeek(c,ref,view){
+  A.attView=view;
+  const back=()=>isAdm()?adminMonth():teacherHome();
+  ref=new Date(ref);ref.setHours(12,0,0,0);
+  let a,b;
+  if(view==='month'){a=new Date(ref.getFullYear(),ref.getMonth(),1,12);b=new Date(ref.getFullYear(),ref.getMonth()+1,0,12)}
+  else{a=mondayOf(ref);b=new Date(a);b.setDate(b.getDate()+6)}
+  attShell(c,'Presenze · '+shortName(c,true),back,h('p',{class:'sub'},'Caricamento…'));
+  const r=await sb.from('lesson_sessions').select('id,session_date,start_time,section,status,attendance(id)').eq('course_id',c.id).gte('session_date',isoD(a)).lte('session_date',isoD(b)).order('start_time');
+  if(r.error)return attShell(c,'Presenze',back,h('p',{class:'err'},'Errore nel caricamento.'));
+  const by={};r.data.forEach(x=>(by[x.session_date]=by[x.session_date]||[]).push(x));
+  const shift=n=>{const d=new Date(a);if(view==='month')d.setMonth(d.getMonth()+n);else d.setDate(d.getDate()+7*n);attWeek(c,d,view)};
+  const label=view==='month'?MESI[a.getMonth()]+' '+a.getFullYear():a.getDate()+' '+MESI[a.getMonth()].slice(0,3).toLowerCase()+' – '+b.getDate()+' '+MESI[b.getMonth()].slice(0,3).toLowerCase()+' '+b.getFullYear();
+  const nav=h('div',{class:'row'},
+    h('button',{class:'icon-btn','aria-label':'Precedente',onclick:()=>shift(-1)},ico('back')),h('strong',{class:'weeklab'},label),
+    h('button',{class:'icon-btn','aria-label':'Successivo',onclick:()=>shift(1),style:'transform:scaleX(-1)'},ico('back')),
+    h('button',{class:'linkbtn small',onclick:()=>attWeek(c,new Date(),view)},'Oggi'));
+  const seg=h('div',{class:'subnav'},[['week','Settimana'],['month','Mese']].map(([id,l])=>h('button',{class:'seg'+(view===id?' on':''),onclick:()=>attWeek(c,ref,id)},l)));
   const todayK=isoD(new Date());
-  const def=sid||(sessions.filter(x=>x.session_date<=todayK)[0]||sessions[sessions.length-1]).id;
-  const lab=x=>x.session_date.split('-').reverse().join('/')+' '+(x.start_time||'').slice(0,5)+(x.section==='morning'?' · mattina':x.section==='evening'?' · sera':'');
-  const sel=h('select',{class:'txt sel','aria-label':'Lezione'},sessions.map(x=>h('option',{value:x.id,selected:x.id===def},lab(x))));
-  sel.addEventListener('change',()=>teacherAttendance(c,sel.value));
-  const cur=sessions.find(x=>x.id===def);
+  const cells=WD.map(w=>h('div',{class:'mwd'},w));
+  const lead=view==='month'?(a.getDay()+6)%7:0;for(let i=0;i<lead;i++)cells.push(h('div'));
+  for(let d=new Date(a);d<=b;d.setDate(d.getDate()+1)){
+    const k2=isoD(d),L=by[k2]||[];
+    const marked=L.length&&L.every(x=>(x.attendance||[]).length||0)?'done':L.some(x=>(x.attendance||[]).length)?'part':L.length?'todo':'';
+    cells.push(h('button',{class:'mcell'+(k2===todayK?' today':'')+(view==='week'?' wk':'')+(L.length?'':' empty'),disabled:L.length?null:true,'aria-label':d.getDate()+' '+MESI[d.getMonth()],onclick:()=>attDay(c,k2)},
+      h('span',{class:'mnum'},String(d.getDate())),
+      ...L.map(x=>h('span',{class:'mline'},(x.start_time||'').slice(0,5)+(x.section?' '+secL(x).slice(0,3):''))),
+      marked?h('span',{class:'mdot '+marked},marked==='done'?'✓ segnate':marked==='part'?'parziali':'da segnare'):null));
+  }
+  attShell(c,'Presenze · '+shortName(c,true),back,seg,nav,h('div',{class:'mgrid'},cells),h('p',{class:'sub small'},'Tocca un giorno con lezione per vedere o segnare le presenze.'));
+}
+async function attDay(c,k,edit){
+  const back=()=>attWeek(c,d12(k),A.attView||'week');
+  const topRow=(prev,next)=>h('div',null,
+    h('button',{class:'linkbtn small',onclick:back},'← '+((A.attView==='month')?'Vista mensile':'Vista settimanale')),
+    h('div',{class:'row'},
+      h('button',{class:'icon-btn','aria-label':'Giorno precedente',disabled:prev?null:true,onclick:()=>prev&&attDay(c,prev)},ico('back')),
+      h('strong',{class:'weeklab'},GIORNI[d12(k).getDay()]+' '+d12(k).getDate()+' '+MESI[d12(k).getMonth()]+' '+d12(k).getFullYear()),
+      h('button',{class:'icon-btn','aria-label':'Giorno successivo',disabled:next?null:true,onclick:()=>next&&attDay(c,next),style:'transform:scaleX(-1)'},ico('back'))));
+  attShell(c,'Presenze · '+shortName(c,true),back,h('p',{class:'sub'},'Caricamento…'));
+  const [ss,pv,nx]=await Promise.all([
+    sb.from('lesson_sessions').select('id,session_date,start_time,end_time,section,status').eq('course_id',c.id).eq('session_date',k).order('start_time'),
+    sb.from('lesson_sessions').select('session_date').eq('course_id',c.id).lt('session_date',k).order('session_date',{ascending:false}).limit(1),
+    sb.from('lesson_sessions').select('session_date').eq('course_id',c.id).gt('session_date',k).order('session_date').limit(1)]);
+  if(ss.error)return attShell(c,'Presenze',back,h('p',{class:'err'},'Errore nel caricamento.'));
+  const sessions=ss.data;const prevK=pv.data&&pv.data[0]&&pv.data[0].session_date,nextK=nx.data&&nx.data[0]&&nx.data[0].session_date;
+  const head=topRow(prevK,nextK);
+  if(!sessions.length)return attShell(c,'Presenze · '+shortName(c,true),back,head,h('p',{class:'sub'},'Nessuna lezione in questo giorno.'));
+  const ids=sessions.map(x=>x.id);
   const [en,at,rs]=await Promise.all([
     sb.from('enrollments').select('section,students(id,display_name)').eq('course_id',c.id),
-    sb.from('attendance').select('student_id,status,camera_off,mic_off,teacher_note').eq('session_id',def),
-    sb.from('session_responses').select('student_id,response,status,note').eq('session_id',def)]);
-  if(en.error||at.error)return mount(topbar('Presenze',back),h('p',{class:'err'},'Errore nel caricamento.'));
-  const roster=en.data.filter(e=>e.students&&(!e.section||!cur.section||e.section===cur.section));
-  const A={};at.data.forEach(r=>A[r.student_id]=r);const R={};(rs.data||[]).forEach(r=>R[r.student_id]=r);
-  const rank=e=>{const a=A[e.students.id],r=R[e.students.id];return a&&a.status==='present'?0:(r&&r.response==='confirm')?1:a&&a.status?2:3};
-  roster.sort((a,b)=>rank(a)-rank(b)||a.students.display_name.localeCompare(b.students.display_name));
-  const conf=Object.values(R).filter(r=>r.response==='confirm').length;
-  const moves=Object.values(R).filter(r=>r.response==='move_request');
+    sb.from('attendance').select('session_id,student_id,status,camera_off,mic_off,teacher_note').in('session_id',ids),
+    sb.from('session_responses').select('session_id,student_id,response,status,note').in('session_id',ids)]);
+  if(en.error||at.error)return attShell(c,'Presenze',back,head,h('p',{class:'err'},'Errore nel caricamento.'));
+  const roster=en.data.filter(e=>e.students&&(!e.section||sessions.some(s=>!s.section||s.section===e.section)));
+  const multi=sessions.length>1;
+  const byS={};at.data.forEach(r=>(byS[r.student_id]=byS[r.student_id]||[]).push(r));
+  const R={};(rs.data||[]).forEach(r=>{if(!R[r.student_id]||r.response==='confirm')R[r.student_id]=r});
+  const sd=roster.map(e=>{
+    const rows=byS[e.students.id]||[];
+    const status=rows.some(r=>r.status==='present')?'present':rows.some(r=>r.status==='absent_notified')?'absent_notified':rows.some(r=>r.status==='absent')?'absent':'';
+    const turn=rows.length===0?'':rows.length>1?'both':rows[0].session_id;
+    const f=rows[0]||{};
+    return {st:e.students,status,turn,cam:rows.some(r=>r.camera_off),mic:rows.some(r=>r.mic_off),note:(rows.find(r=>r.teacher_note)||{}).teacher_note||'',resp:R[e.students.id]};
+  }).sort((p,q)=>p.st.display_name.localeCompare(q.st.display_name));
+  const turnTxt=t=>!multi||!t?'':t==='both'?'Entrambi':secL(sessions.find(s=>s.id===t)||{});
+  const conf=sd.filter(x=>x.resp&&x.resp.response==='confirm').length;
+  const counts=h('p',{class:'sub small'},sessions.map(s=>(s.start_time||'').slice(0,5)+(s.end_time?'–'+s.end_time.slice(0,5):'')+(multi?' '+secL(s):'')).join(' · ')+' · '+sd.filter(x=>x.status==='present').length+' presenti su '+sd.length+(conf?' · '+conf+' confermate':''));
+  if(!edit){
+    const rows=sd.map(x=>{const L=STL[x.status];
+      return h('div',{class:'att-row '+(L?L[2]:'')},
+        h('div',{class:'att-name'},x.st.display_name,h('span',{class:'att-badge'},L?L[0]:'Da segnare'),multi&&x.turn?h('span',{class:'tag'},turnTxt(x.turn)):null,x.cam?h('span',{class:'tag'},'cam spenta'):null,x.mic?h('span',{class:'tag'},'mic spento'):null),
+        x.note?h('p',{class:'sub small'},x.note):null)});
+    return attShell(c,'Presenze · '+shortName(c,true),back,head,counts,h('button',{class:'primary',onclick:()=>attDay(c,k,true)},'Modifica'),h('div',{class:'att-list'},rows));
+  }
+  // modifica
+  const nowMin=new Date().getHours()*60+new Date().getMinutes();
+  const near=sessions.slice().sort((p,q)=>{const m=s=>{const t=(s.start_time||'00:00').split(':');return Math.abs(+t[0]*60+ +t[1]-nowMin)};return m(p)-m(q)})[0];
   const ctl={};const msg=h('p',{role:'status'});
-  const rows=roster.map(e=>{
-    const st=e.students,a=A[st.id]||{};
-    const sl=h('select',{class:'txt sel','aria-label':'Stato '+st.display_name},[['','—'],['present','Presente'],['absent','Assente'],['absent_notified','Assente avvisato']].map(([v,t])=>h('option',{value:v,selected:(a.status||'')===v},t)));
-    const cam=h('input',{type:'checkbox',checked:!!a.camera_off,'aria-label':'Telecamera spenta'});
-    const mic=h('input',{type:'checkbox',checked:!!a.mic_off,'aria-label':'Microfono spento'});
-    const nt=h('textarea',{class:'txt att-note',rows:'2',maxlength:'800',placeholder:'Note (solo docenti e amministrazione): es. camera spenta ma seguiva, distratto, non partecipava…','aria-label':'Note su '+st.display_name});
-    nt.value=a.teacher_note||'';
-    ctl[st.id]={sl,cam,mic,nt};
-    const r=R[st.id];
-    const row=h('div',{class:'att-row'},
-      h('div',{class:'att-name'},st.display_name,r?h('span',{class:'tag'},r.response==='confirm'?'confermata':'chiede spostamento'):null),
-      sl,
-      h('label',{class:'att-chk'},cam,'Cam spenta'),h('label',{class:'att-chk'},mic,'Mic spento'),nt);
-    const paint=()=>{row.classList.remove('st-present','st-absent','st-notified');const v=sl.value;if(v)row.classList.add(v==='present'?'st-present':v==='absent'?'st-absent':'st-notified');const b=row.querySelector('.att-badge');if(b)b.remove();if(v)row.querySelector('.att-name').append(h('span',{class:'att-badge'},v==='present'?'✓ Presente':v==='absent'?'✗ Assente':'Assente avvisato'))};
-    sl.addEventListener('change',()=>{paint();msg.textContent=''});paint();
-    return row;
+  const rowsEl=sd.map(x=>{
+    const st=x.st;
+    const sl=h('select',{class:'txt sel','aria-label':'Stato '+st.display_name},[['','—'],['present','Presente'],['absent','Assente'],['absent_notified','Assente avvisato']].map(([v,t])=>h('option',{value:v,selected:x.status===v},t)));
+    const tn=multi?h('select',{class:'txt sel','aria-label':'Turno di '+st.display_name},[...sessions.map(s=>[s.id,secL(s)]),['both','Entrambi']].map(([v,t])=>h('option',{value:v,selected:(x.turn||near.id)===v},t))):null;
+    const cam=h('input',{type:'checkbox',checked:x.cam,'aria-label':'Telecamera spenta'});
+    const mic=h('input',{type:'checkbox',checked:x.mic,'aria-label':'Microfono spento'});
+    const nt=h('textarea',{class:'txt att-note',rows:'2',maxlength:'800',placeholder:'Note (solo docenti e amministrazione)','aria-label':'Note su '+st.display_name});nt.value=x.note;
+    ctl[st.id]={sl,tn,cam,mic,nt,had:x.turn};
+    const row=h('div',{class:'att-row'},h('div',{class:'att-name'},st.display_name,x.resp?h('span',{class:'tag'},x.resp.response==='confirm'?'confermata':'chiede spostamento'):null),
+      sl,tn,h('label',{class:'att-chk'},cam,'Cam spenta'),h('label',{class:'att-chk'},mic,'Mic spento'),nt);
+    const paint=()=>{row.classList.remove('st-present','st-absent','st-notified');const L=STL[sl.value];if(L)row.classList.add(L[2]);const o=row.querySelector('.att-badge');if(o)o.remove();if(L)row.querySelector('.att-name').append(h('span',{class:'att-badge'},L[0]))};
+    sl.addEventListener('change',()=>{paint();msg.textContent=''});paint();return row;
   });
   const save=h('button',{class:'primary',onclick:async()=>{
-    const orphan=roster.find(e=>!ctl[e.students.id].sl.value&&(ctl[e.students.id].nt.value.trim()||ctl[e.students.id].cam.checked||ctl[e.students.id].mic.checked));
-    if(orphan){msg.className='err';msg.textContent='Imposta lo stato (presente/assente) di '+orphan.students.display_name+' prima di salvare note o cam/mic.';return}
+    const orphan=sd.find(x=>{const q=ctl[x.st.id];return !q.sl.value&&(q.nt.value.trim()||q.cam.checked||q.mic.checked)});
+    if(orphan){msg.className='err';msg.textContent='Imposta lo stato di '+orphan.st.display_name+' prima di salvare note o cam/mic.';return}
     save.disabled=true;
-    const rowsUp=roster.map(e=>e.students.id).filter(id=>ctl[id].sl.value).map(id=>({session_id:def,student_id:id,school_id:c.school_id,status:ctl[id].sl.value,camera_off:ctl[id].cam.checked,mic_off:ctl[id].mic.checked,teacher_note:ctl[id].nt.value.trim()||null}));
+    const up=[],del=[];
+    sd.forEach(x=>{const q=ctl[x.st.id];
+      const want=q.sl.value?(multi?(q.tn.value==='both'?ids:[q.tn.value]):ids):[];
+      want.forEach(sid=>up.push({session_id:sid,student_id:x.st.id,school_id:c.school_id,status:q.sl.value,camera_off:q.cam.checked,mic_off:q.mic.checked,teacher_note:q.nt.value.trim()||null}));
+      ids.filter(i=>!want.includes(i)).forEach(sid=>del.push([sid,x.st.id]));
+    });
     let error=null;
-    if(rowsUp.length){({error}=await sb.from('attendance').upsert(rowsUp,{onConflict:'session_id,student_id'}))}
-    if(!error)await sb.from('lesson_sessions').update({status:'held'}).eq('id',def);
+    if(up.length)({error}=await sb.from('attendance').upsert(up,{onConflict:'session_id,student_id'}));
+    if(!error)for(const [sid,stid] of del){const r=await sb.from('attendance').delete().eq('session_id',sid).eq('student_id',stid);if(r.error){error=r.error;break}}
+    if(!error){const used=[...new Set(up.map(r=>r.session_id))];if(used.length)await sb.from('lesson_sessions').update({status:'held'}).in('id',used)}
     save.disabled=false;
-    msg.className=error?'err':'ok';msg.textContent=error?'Non sono riuscita a salvare: '+error.message:'Presenze salvate.';
+    if(error){msg.className='err';msg.textContent='Non sono riuscito a salvare: '+error.message;return}
+    attDay(c,k);
   }},'Salva presenze');
-  mount(topbar('Presenze · '+c.name,back),sel,
-    h('p',{class:'sub small'},conf+' '+(conf===1?'confermata':'confermate')+' su '+roster.length+(moves.length?' · '+moves.length+' richiesta/e di spostamento'+': '+moves.map(m=>{const e=roster.find(x=>x.students.id===m.student_id);return (e?e.students.display_name:'')+(m.note?' ('+m.note+')':'')}).join(', '):'')),
-    h('p',{class:'sub small'},'Cam e mic spenti sono visibili solo ai docenti. L’alunno vede soltanto presente/assente.'),
-    h('div',{class:'att-list'},rows),save,msg,footer());
+  attShell(c,'Presenze · '+shortName(c,true),back,head,counts,h('p',{class:'sub small'},'Cam e mic spenti sono visibili solo a docenti e amministrazione. L’alunno vede soltanto presente/assente. “Entrambi” è solo informativo.'),
+    h('div',{class:'att-list'},rowsEl),h('div',{class:'row'},h('button',{class:'secondary',onclick:()=>attDay(c,k)},'Annulla'),save),msg);
 }
 
 /* ---------- boot ---------- */
