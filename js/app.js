@@ -840,7 +840,7 @@ async function teacherHome(){
         h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
       h('div',{class:'row'},
         h('button',{class:'primary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
-        h('button',{class:'secondary',onclick:()=>teacherAnnouncements(c)},'Avvisi'),h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link della chat','Gruppo WhatsApp: incolla il link d’invito. Chat singola: https://wa.me/39… (lascia vuoto per cancellare)',c.chat_url||'','Salva');if(v===null)return;const u=v.trim();if(u&&!/^https:\/\//.test(u)){await say('Link non valido','Il link deve iniziare con https://');return}const {error}=await sb.from('courses').update({chat_url:u||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.chat_url?'Chat ✓':'Chat'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link Zoom del corso','Incolla il link (lascia vuoto per cancellarlo)',c.zoom_url||'','Salva');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
+        h('button',{class:'secondary',onclick:()=>teacherAnnouncements(c)},'Avvisi'),h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link della chat','Gruppo WhatsApp: incolla il link d’invito. Chat singola: https://wa.me/39… (lascia vuoto per cancellare)',c.chat_url||'','Salva');if(v===null)return;const u=v.trim();if(u&&!/^https:\/\//.test(u)){await say('Link non valido','Il link deve iniziare con https://');return}const {error}=await sb.from('courses').update({chat_url:u||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.chat_url?'Chat ✓':'Chat'),c.chat_url?h('a',{class:'secondary btnlink',href:c.chat_url,target:'_blank',rel:'noopener'},'Apri chat'):null,h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link Zoom del corso','Incolla il link (lascia vuoto per cancellarlo)',c.zoom_url||'','Salva');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
   });
   mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),tTabs('corsi'),footer());
 }
@@ -1677,7 +1677,7 @@ async function teacherAttendance(c,sid){
   roster.sort((a,b)=>rank(a)-rank(b)||a.students.display_name.localeCompare(b.students.display_name));
   const conf=Object.values(R).filter(r=>r.response==='confirm').length;
   const moves=Object.values(R).filter(r=>r.response==='move_request');
-  const ctl={};
+  const ctl={};const msg=h('p',{role:'status'});
   const rows=roster.map(e=>{
     const st=e.students,a=A[st.id]||{};
     const sl=h('select',{class:'txt sel','aria-label':'Stato '+st.display_name},[['','—'],['present','Presente'],['absent','Assente'],['absent_notified','Assente avvisato']].map(([v,t])=>h('option',{value:v,selected:(a.status||'')===v},t)));
@@ -1687,12 +1687,14 @@ async function teacherAttendance(c,sid){
     nt.value=a.teacher_note||'';
     ctl[st.id]={sl,cam,mic,nt};
     const r=R[st.id];
-    return h('div',{class:'att-row'},
+    const row=h('div',{class:'att-row'},
       h('div',{class:'att-name'},st.display_name,r?h('span',{class:'tag'},r.response==='confirm'?'confermata':'chiede spostamento'):null),
       sl,
       h('label',{class:'att-chk'},cam,'Cam spenta'),h('label',{class:'att-chk'},mic,'Mic spento'),nt);
+    const paint=()=>{row.classList.remove('st-present','st-absent','st-notified');const v=sl.value;if(v)row.classList.add(v==='present'?'st-present':v==='absent'?'st-absent':'st-notified');const b=row.querySelector('.att-badge');if(b)b.remove();if(v)row.querySelector('.att-name').append(h('span',{class:'att-badge'},v==='present'?'✓ Presente':v==='absent'?'✗ Assente':'Assente avvisato'))};
+    sl.addEventListener('change',()=>{paint();msg.textContent=''});paint();
+    return row;
   });
-  const msg=h('p',{role:'status'});
   const save=h('button',{class:'primary',onclick:async()=>{
     const orphan=roster.find(e=>!ctl[e.students.id].sl.value&&(ctl[e.students.id].nt.value.trim()||ctl[e.students.id].cam.checked||ctl[e.students.id].mic.checked));
     if(orphan){msg.className='err';msg.textContent='Imposta lo stato (presente/assente) di '+orphan.students.display_name+' prima di salvare note o cam/mic.';return}
