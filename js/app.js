@@ -840,7 +840,7 @@ async function teacherHome(){
         h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
       h('div',{class:'row'},
         h('button',{class:'primary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
-        h('button',{class:'secondary',onclick:()=>teacherAnnouncements(c)},'Avvisi'),h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link della chat','Gruppo WhatsApp: incolla il link d’invito. Chat singola: https://wa.me/39… (lascia vuoto per cancellare)',c.chat_url||'','Salva');if(v===null)return;const u=v.trim();if(u&&!/^https:\/\//.test(u)){await say('Link non valido','Il link deve iniziare con https://');return}const {error}=await sb.from('courses').update({chat_url:u||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.chat_url?'Chat ✓':'Chat'),c.chat_url?h('a',{class:'secondary btnlink',href:c.chat_url,target:'_blank',rel:'noopener'},'Apri chat'):null,h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link Zoom del corso','Incolla il link (lascia vuoto per cancellarlo)',c.zoom_url||'','Salva');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso')));
+        h('button',{class:'secondary',onclick:()=>teacherAnnouncements(c)},'Avvisi'),h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link della chat','Gruppo WhatsApp: incolla il link d’invito. Chat singola: https://wa.me/39… (lascia vuoto per cancellare)',c.chat_url||'','Salva');if(v===null)return;const u=v.trim();if(u&&!/^https:\/\//.test(u)){await say('Link non valido','Il link deve iniziare con https://');return}const {error}=await sb.from('courses').update({chat_url:u||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.chat_url?'Chat ✓':'Chat'),c.chat_url?h('a',{class:'secondary btnlink',href:c.chat_url,target:'_blank',rel:'noopener'},'Apri chat'):null,h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link Zoom del corso','Incolla il link (lascia vuoto per cancellarlo)',c.zoom_url||'','Salva');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso'),h('button',{class:'secondary',onclick:()=>courseHistoryView(c)},'Storico classe')));
   });
   mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),tTabs('corsi'),footer());
 }
@@ -1297,6 +1297,7 @@ async function studentDetail(id){
   formPage(s.name,'alunni',()=>adminHome('alunni'),[
     fld('Nome e cognome',nm),fld('Telefono',ph),fld('Città',ci),fld('Data di nascita',bd),fld('Stato',ac),fld('Note',nt),
     h('h3',null,'Accesso'),acc,h('h3',null,'Storico corsi'),...storico,
+    h('h3',null,'Storico presenze'),await studentHistoryBox(id),
     h('h3',null,'Esami'),h('p',{class:'sub small'},'Lo storico degli esami comparirà qui. Esercizi svolti finora: '+s.results+'.')],
     async()=>{const x=await sb.rpc('admin_update_student',{p_id:id,p_name:nm.value,p_phone:ph.value,p_city:ci.value,p_birth:bd.value||null,p_notes:nt.value,p_active:ac.value==='1'});if(x.error)throw x.error;for(const t of starts){if(t.el.value!==t.old){const y=await sb.rpc('admin_set_enrollment_start',{p_student:id,p_course:t.course,p_date:t.el.value||null});if(y.error)throw y.error}}adminHome('alunni')},
     async()=>{if(!await confirmDelete(s.name,'Si cancellano anche presenze, risultati degli esercizi e accesso. Se vuoi solo che non entri più, imposta “Non attivo”: lo storico resta.'))return;
@@ -1322,6 +1323,42 @@ async function staffDetail(id){
     async()=>{if(!await confirmDelete(p.name,'Il docente perde l’accesso. Le sue '+p.courses.length+' classi restano, senza docente, con alunni e lezioni. Per sospenderlo senza eliminarlo usa “Blocca accesso”.'))return;
       const x=await sb.rpc('admin_delete_teacher',{p_id:id});if(x.error)return say('Errore',x.error.message);adminHome('docenti')});
 }
+
+/* --- storico docenti / classe / presenze alunno --- */
+const dIt=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(2,4):'';
+async function courseHistoryBlock(courseId){
+  const box=h('div',null,h('p',{class:'sub small'},'Caricamento…'));
+  const r=await sb.rpc('course_history',{p_course:courseId});
+  if(r.error){box.replaceChildren(h('p',{class:'err'},'Storico non disponibile.'));return box}
+  const t=(r.data&&r.data.teachers)||[],ev=(r.data&&r.data.events)||[];
+  box.replaceChildren(
+    h('p',{class:'sub small'},'Docenti della classe'),
+    ...(t.length?t.map(x=>h('p',{class:'sub small'},h('strong',null,x.name),' · '+(x.from?'dal '+dIt(x.from):'dall’inizio')+(x.to?' al '+dIt(x.to):' · attuale'))):[h('p',{class:'sub small'},'Nessun docente assegnato.')]),
+    h('p',{class:'sub small',style:'margin-top:10px'},'Cambiamenti'),
+    ...(ev.length?ev.map(x=>h('p',{class:'sub small'},dIt(x.date)+' · '+x.text)):[h('p',{class:'sub small'},'Nessun cambiamento registrato.')]));
+  return box;
+}
+async function courseHistoryView(c){
+  const back=()=>teacherHome();
+  mount(topbar('Storico classe',back),h('p',{class:'sub small'},c.name),await courseHistoryBlock(c.id),footer());
+}
+const ST_L={present:['Presente','g'],absent:['Assente','b'],absent_notified:['Assente avvisato','n']};
+function studentHistoryEls(d,withTeacher){
+  d=d||{};const per=d.periods||[],rows=d.rows||[];
+  const pEls=per.length?per.map(x=>h('p',{class:'sub small'},h('strong',null,x.course),(x.teacher?' · '+x.teacher:'')+' · '+(x.from?'dal '+dIt(x.from):'dall’inizio')+(x.to?' al '+dIt(x.to)+(x.moved_to?' (spostato in '+x.moved_to+')':''):' · in corso'))):[h('p',{class:'sub small'},'Nessuna classe.')];
+  const pres=rows.filter(a=>a.status==='present').length,abs=rows.length-pres;
+  const tb=rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Data','Classe','Docente','Stato','Ingresso','Motivo alunno','Note docente'].map(t=>h('th',null,t)))),
+    h('tbody',null,rows.map(a=>h('tr',null,h('td',null,dIt(a.date)),h('td',null,a.course),h('td',null,a.teacher||''),h('td',null,h('span',{class:'pill '+(ST_L[a.status]||['','n'])[1]},(ST_L[a.status]||[a.status])[0])),
+      h('td',null,a.joined_at?new Date(a.joined_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):''),h('td',null,[a.reason,a.note].filter(Boolean).join(' · ')),
+      h('td',null,[a.camera_off?'cam spenta':'',a.mic_off?'mic spento':'',a.teacher_note].filter(Boolean).join(' · '))))))):h('p',{class:'sub'},'Nessuna presenza registrata.');
+  return [h('h3',null,'Classi e docenti'),...pEls,h('h3',null,'Presenze di tutti i corsi'),h('p',null,'Presenze: ',h('strong',null,String(pres)),' · Assenze: ',h('strong',null,String(abs))),tb];
+}
+async function studentHistoryBox(studentId){
+  const box=h('div',null,h('p',{class:'sub small'},'Caricamento…'));
+  const r=await sb.rpc('student_history',{p_student:studentId});
+  if(r.error)box.replaceChildren(h('p',{class:'err'},'Storico non disponibile.'));else box.replaceChildren(...studentHistoryEls(r.data));
+  return box;
+}
 async function courseDetail(id){
   mount(aHeader(),h('p',{class:'sub'},'Caricamento…'),aTabs('classi'));
   const c=A.ov.courses.find(x=>x.id===id);
@@ -1337,7 +1374,8 @@ async function courseDetail(id){
   formPage(shortName(c),'classi',()=>adminHome('classi'),[
     fld('Nome',nm),fld('Tipo',h('input',{class:'txt',type:'text',value:KL[c.kind],readonly:true})),fld('Livello',lv),fld('Lingua',lg),fld('Docente',dc),fld('Stato',ac),
     h('h3',null,'Contenuti'),h('p',{class:'sub small'},st.students+' alunni · '+st.lessons+' lezioni caricate · '+st.sessions+' lezioni in calendario · '+st.whiteboards+' lavagne · '+st.announcements+' avvisi'),
-    h('h3',null,'Alunni'),h('div',null,...(stu.length?stu.map(s=>h('span',{class:'ctag'},s.name)):[h('p',{class:'sub small'},'Nessun alunno.')]))],
+    h('h3',null,'Alunni'),h('div',null,...(stu.length?stu.map(s=>h('span',{class:'ctag'},s.name)):[h('p',{class:'sub small'},'Nessun alunno.')])),
+    h('h3',null,'Storico classe'),await courseHistoryBlock(id)],
     async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:ac.value==='1'});if(x.error)throw x.error;adminHome('classi')},
     async()=>{if(!await confirmDelete('la classe '+shortName(c,true),'Si cancellano anche '+st.lessons+' lezioni caricate, '+st.sessions+' lezioni in calendario, '+st.whiteboards+' lavagne e '+st.announcements+' avvisi; gli '+st.students+' alunni restano ma escono dalla classe. Per archiviarla senza perdere nulla imposta “Non attiva”.'))return;
       const x=await sb.rpc('admin_delete_course',{p_id:id});if(x.error)return say('Errore',x.error.message);adminHome('classi')});
@@ -1698,16 +1736,9 @@ async function studentSheet(st,c,tab){
   const head=[topbar(st.display_name,back),h('p',{class:'sub small'},c.name+' · codice ',h('strong',null,String(st.code||'').toUpperCase())),h('div',{class:'row'},tb('ex','Esercizi'),tb('pres','Presenze'),tb('prog','Progressi'))];
   mount(head,h('p',{class:'sub'},'Caricamento…'));
   if(tab==='pres'){
-    const {data,error}=await sb.from('attendance').select('status,joined_at,reason,note,camera_off,mic_off,teacher_note,lesson_sessions(session_date,course_id)').eq('student_id',st.id);
-    if(error)return mount(head,h('p',{class:'err'},'Errore nel caricamento.'));
-    const lab={present:['Presente','g'],absent:['Assente','b'],absent_notified:['Assente avvisato','n']};
-    const seen={};const dd=data.filter(a=>a.lesson_sessions).filter(a=>{const k=a.lesson_sessions.course_id+a.lesson_sessions.session_date;if(seen[k]){if(a.status==='present'&&seen[k].status!=='present'){Object.assign(seen[k],a)}return false}seen[k]=a;return true});
-    const rows=dd.sort((a,b)=>a.lesson_sessions.session_date<b.lesson_sessions.session_date?1:-1).map(a=>h('tr',null,
-      h('td',null,a.lesson_sessions.session_date),h('td',null,h('span',{class:'pill '+(lab[a.status]||['','n'])[1]},(lab[a.status]||[a.status])[0])),
-      h('td',null,a.joined_at?new Date(a.joined_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):''),h('td',null,[a.reason,a.note].filter(Boolean).join(' · ')),h('td',null,[a.camera_off?'cam spenta':'',a.mic_off?'mic spento':'',a.teacher_note].filter(Boolean).join(' · '))));
-    const pres=dd.filter(a=>a.status==='present').length,abs=dd.filter(a=>a.status!=='present').length;
-    return mount(head,h('p',null,'Presenze: ',h('strong',null,pres),' · Assenze: ',h('strong',null,abs)),
-      rows.length?h('div',{class:'scroll'},h('table',null,h('thead',null,h('tr',null,['Data','Stato','Ingresso','Motivo alunno','Note docente'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'sub'},'Nessuna presenza registrata.'),footer());
+    const r=await sb.rpc('student_history',{p_student:st.id});
+    if(r.error)return mount(head,h('p',{class:'err'},'Errore nel caricamento.'));
+    return mount(head,...studentHistoryEls(r.data),footer());
   }
   const {data,error}=await sb.from('exercise_results').select('lesson_id,exercise_idx,score,total,details,created_at,lessons(number,title)').eq('student_id',st.id).order('created_at',{ascending:false}).limit(1000);
   if(error)return mount(head,h('p',{class:'err'},'Errore nel caricamento.'));
