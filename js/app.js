@@ -253,6 +253,7 @@ function consentView(){
 /* ---------- student: shell ---------- */
 const ICO={key:'M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4',
   menu:'M4 7h16M4 12h16M4 17h16',
+  bell:'M6 16V11a6 6 0 1112 0v5l2 2H4zM10 21h4',
   chev:'M9 6l6 6-6 6',
   back:'M15 6l-6 6 6 6',
   book:'M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3V4zM5 17a3 3 0 013-3h11',
@@ -282,9 +283,9 @@ function drawer(){
   const panel=h('div',{class:'dr-panel',role:'dialog','aria-label':'Menu'},
     h('p',{class:'dr-title'},'Esmet Academy'),
     h('button',{class:'dr-item',onclick:()=>{close();calView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📅'),'Calendario'),
-    h('button',{class:'dr-item',onclick:()=>{close();homeView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📚'),'Lezioni'),
-    h('button',{class:'dr-item',onclick:()=>{close();registroView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📋'),'Registro'),
+    h('button',{class:'dr-item',onclick:()=>{close();homeView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📚'),'Esercizi'),
     h('button',{class:'dr-item',onclick:()=>{close();lavagneView()}},h('span',{class:'dr-em','aria-hidden':'true'},'🖼️'),'Lavagne'),
+    h('button',{class:'dr-item',onclick:()=>{close();registroView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📋'),'Registro'),
     h('button',{class:'dr-item',onclick:()=>{close();avvisiView()}},h('span',{class:'dr-em','aria-hidden':'true'},'📢'),'Avvisi'),
     item('user','Il mio profilo',()=>profileView()),
     item('key','Il mio accesso',()=>accountView()),
@@ -296,7 +297,7 @@ function drawer(){
   document.body.append(ov);
 }
 function courseSwitch(){
-  const rows=S.me.courses.map(c=>h('button',{class:'row-item',onclick:()=>{S.cid=c.id;homeView()}},h('span',{class:'ri-l'},ico('book'),h('span',null,c.name,c.teacher?h('span',{class:'sub small',style:'display:block'},'Docente: '+c.teacher):null)),ico('chev')));
+  const rows=S.me.courses.map(c=>h('button',{class:'row-item',onclick:()=>{S.cid=c.id;homeView()}},h('span',{class:'ri-l'},ico('book'),h('span',null,c.name+(c.archived?' (archiviato)':''),c.teacher?h('span',{class:'sub small',style:'display:block'},'Docente: '+c.teacher):null)),ico('chev')));
   mount(topbar('Cambia corso',()=>homeView()),h('div',{class:'rows'},rows),footer());
 }
 function topbar(title,back){
@@ -306,14 +307,31 @@ function topbar(title,back){
 }
 function tabs(active){
   const t=(id,label,em,fn)=>h('button',{class:'tab'+(active===id?' on':''),onclick:fn,'aria-current':active===id?'page':null},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
-  return h('nav',{class:'tabbar'},t('cal','Calendario','📅',()=>calView()),t('lez','Lezioni','📚',()=>homeView()),t('reg','Registro','📋',()=>registroView()),t('lav','Lavagne','🖼️',()=>lavagneView()));
+  return h('nav',{class:'tabbar'},t('cal','Calendario','📅',()=>calView()),t('lez','Esercizi','📚',()=>homeView()),t('lav','Lavagne','🖼️',()=>lavagneView()),t('reg','Registro','📋',()=>registroView()));
+}
+/* ---------- campanella notifiche ---------- */
+async function notifFetch(staff){
+  try{const r=staff?await sb.rpc('my_notifications'):await sb.rpc('student_notifications',{p_code:S.code});return Array.isArray(r.data)?r.data:[]}catch(e){return []}
+}
+function bellBtn(staff,backFn){
+  const dot=h('span',{class:'bdot',hidden:'hidden'});
+  const b=h('button',{class:'icon-btn bellbtn',style:'background:var(--sand);position:relative','aria-label':'Notifiche',onclick:()=>notifView(staff,backFn)},ico('bell'),dot);
+  notifFetch(staff).then(l=>{const n=l.filter(x=>!x.read).length;if(n){dot.hidden=false;dot.textContent=n>9?'9+':String(n);b.setAttribute('aria-label','Notifiche, '+n+' da leggere')}});
+  return b;
+}
+async function notifView(staff,backFn){
+  mount(topbar('Notifiche',backFn),h('p',{class:'sub'},'Caricamento…'));
+  const l=await notifFetch(staff);
+  const rows=l.length?l.map(x=>h('div',{class:'card notif'+(x.read?'':' unread')},h('strong',null,x.title),x.body?h('p',{class:'sub small'},x.body):null,h('span',{class:'sub small'},fmtDate(x.at)))):[h('p',{class:'sub'},'Nessuna notifica.')];
+  mount(topbar('Notifiche',backFn),h('p',{class:'sub small'},'Le notifiche vengono conservate per 90 giorni.'),...rows,footer());
+  if(l.some(x=>!x.read)){try{await (staff?sb.rpc('my_notifications_read'):sb.rpc('student_notifications_read',{p_code:S.code}))}catch(e){}}
 }
 function tabHeader(){
   const c=curCourse();
   return h('div',{class:'thead2'},
     h('div',{class:'thead-top'},
       h('img',{class:'logo-sm',src:'icons/logo.png',alt:'Esmet Academy'}),
-      h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:drawer},ico('menu'))),
+      h('div',{class:'row',style:'gap:8px'},bellBtn(false,()=>calView()),h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:drawer},ico('menu')))),
     h('div',{class:'thead'},
       h('div',{class:'avatar','aria-hidden':'true'},(S.me.name||'?').trim().charAt(0).toUpperCase()),
       h('div',{class:'tname'},h('strong',null,S.me.name),h('span',{class:'sub small'},c?c.name:''))));
@@ -347,11 +365,11 @@ function homeView(offline){
   });
   mount(tabHeader(),
     offline?h('p',{class:'sub small'},'Sei offline: vedi l’ultima versione scaricata.'):null,
-    c.teacher?h('p',{class:'sub small'},c.name+' · Docente: '+c.teacher):null,
+    c.teacher?h('p',{class:'sub small'},c.name+' · Docente: '+c.teacher+(c.archived?' · Corso archiviato (sola lettura)':'')):(c.archived?h('p',{class:'sub small'},c.name+' · Corso archiviato (sola lettura)'):null),
     join,joinMsg,
     accountBanner(),
-    h('h3',{class:'sect'},'Lezioni'),
-    rows.length?h('div',{class:'rows'},rows):h('p',{class:'sub'},'Nessuna lezione pubblicata.'),
+    h('h3',{class:'sect'},'Esercizi'),
+    rows.length?h('div',{class:'rows'},rows):h('p',{class:'sub'},'Nessun esercizio disponibile.'),
     tabs('lez'),footer());
 }
 
@@ -971,7 +989,7 @@ function aTabs(active){
 function aHeader(){
   return h('div',{class:'thead2'},h('div',{class:'thead-top'},
     h('img',{class:'logo-sm',src:'icons/logo.png',alt:'Esmet Academy'}),
-    h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:aDrawer},ico('menu'))));
+    h('div',{class:'row',style:'gap:8px'},bellBtn(true,()=>adminHome()),h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:aDrawer},ico('menu')))));
 }
 function subNav(items,active){
   return h('div',{class:'subnav'},items.map(([id,l,fn])=>h('button',{class:'seg'+(id===active?' on':''),onclick:fn},l)));
@@ -1370,7 +1388,7 @@ async function courseDetail(id){
   const lv=selEl(LEVELS.map(x=>[x,x]),c.level,'Livello');
   const lg=selEl(LANGS.map(x=>[x,x]),c.language||'Tedesco','Lingua');
   const dc=selEl(teacherOpts(),c.teacher_id||'','Docente');
-  const ac=selEl([['1','Attiva'],['0','Non attiva (archiviata)']],c.active===false?'0':'1','Stato');
+  const ac=selEl([['1','Attiva'],['0','Archiviata']],c.active===false?'0':'1','Stato');if(c.active===false)ac.disabled=true;
   const stu=A.ov.students.filter(s=>s.course_ids.includes(id));
   formPage(shortName(c),'classi',()=>adminHome('classi'),[
     fld('Nome',nm),fld('Tipo',h('input',{class:'txt',type:'text',value:KL[c.kind],readonly:true})),fld('Livello',lv),fld('Lingua',lg),fld('Docente',dc),fld('Stato',ac),
@@ -1378,8 +1396,24 @@ async function courseDetail(id){
     h('h3',null,'Alunni'),h('div',null,...(stu.length?stu.map(s=>h('span',{class:'ctag'},s.name)):[h('p',{class:'sub small'},'Nessun alunno.')])),
     h('h3',null,'Storico classe'),await courseHistoryBlock(id)],
     async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:ac.value==='1'});if(x.error)throw x.error;adminHome('classi')},
-    async()=>{if(!await confirmDelete('la classe '+shortName(c,true),'Si cancellano anche '+st.lessons+' lezioni caricate, '+st.sessions+' lezioni in calendario, '+st.whiteboards+' lavagne e '+st.announcements+' avvisi; gli '+st.students+' alunni restano ma escono dalla classe. Per archiviarla senza perdere nulla imposta “Non attiva”.'))return;
-      const x=await sb.rpc('admin_delete_course',{p_id:id});if(x.error)return say('Errore',x.error.message);adminHome('classi')});
+    async()=>{
+      const hasData=(st.attendance||0)>0||(st.results||0)>0||st.lessons>0||st.whiteboards>0||st.announcements>0;
+      const arch=async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:false});if(x.error)return say('Errore',x.error.message);adminHome('classi')};
+      const del=async(force)=>{const x=await sb.rpc('admin_delete_course',{p_id:id,p_force:!!force});if(x.error)return say('Errore',x.error.message);adminHome('classi')};
+      if(!hasData){
+        if(!await confirmDelete('la classe '+shortName(c,true),'La classe ha solo alunni e lezioni in calendario ('+st.sessions+'); gli '+st.students+' alunni restano ma escono dalla classe.'))return;
+        return del(false);
+      }
+      const ov=h('div',{class:'dlg-ov'},h('div',{class:'dlg'},
+        h('h3',null,'Archiviare la classe?'),
+        h('p',{class:'sub small'},'La classe contiene dati ('+(st.attendance||0)+' presenze, '+(st.results||0)+' risultati esercizi, '+st.lessons+' lezioni caricate, '+st.whiteboards+' lavagne, '+st.announcements+' avvisi). Archiviandola resta consultabile in sola lettura (gli alunni vedono lo storico) ma nessuno può più modificarla o riattivarla dall’app.'),
+        h('div',{class:'formbar'},
+          h('button',{class:'danger',onclick:async()=>{ov.remove();if(!await askYes('Eliminare DEFINITIVAMENTE?','Si perdono per sempre presenze, risultati, lezioni, lavagne e avvisi della classe. Non si può annullare.','Elimina definitivamente'))return;del(true)}},'Elimina definitivamente'),
+          h('span',{style:'flex:1'}),
+          h('button',{class:'secondary',onclick:()=>ov.remove()},'Annulla'),
+          h('button',{class:'primary',onclick:()=>{ov.remove();arch()}},'Archivia'))));
+      document.body.append(ov);
+    });
 }
 
 /* calendario amministratore: mese a quadrati → giorno → presenze */
@@ -1387,16 +1421,17 @@ const WD=['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
 async function adminCalBase(){
   if(!A.staff){const r=await sb.rpc('admin_staff_list');A.staff=r.data}
   const ts=A.staff.staff.filter(p=>p.role==='teacher');
-  const pick=selEl([['','Tutti i docenti'],...ts.map(p=>[p.id,p.name])],A.calT||'','Docente');
+  const pick=selEl([['','Tutti i docenti'],['__none','Senza docente'],...ts.map(p=>[p.id,p.name])],A.calT||'','Docente');
   return {ts,pick};
 }
+const calOk=c=>!A.calT||(A.calT==='__none'?!c.teacher_id:c.teacher_id===A.calT);
 async function adminLoadRange(a,b){
   const [cs,ss]=await Promise.all([
     sb.from('courses').select('id,name,kind,level,language,teacher_id').eq('active',true),
     sb.from('lesson_sessions').select('id,course_id,section,session_date,start_time,end_time,place,status,session_responses(student_id,response,status,note,students(display_name))').gte('session_date',isoD(a)).lte('session_date',isoD(b)).order('session_date').order('start_time')]);
   if(cs.error||ss.error)throw (cs.error||ss.error);
   const tn={};A.staff.staff.forEach(p=>tn[p.id]=p.name);
-  const cname={};cs.data.filter(c=>!A.calT||c.teacher_id===A.calT).forEach(c=>{c.tname=tn[c.teacher_id]||'';cname[c.id]=c});
+  const cname={};cs.data.filter(calOk).forEach(c=>{c.tname=tn[c.teacher_id]||'';cname[c.id]=c});
   return {cname,sessions:ss.data.filter(x=>cname[x.course_id]),courses:Object.values(cname)};
 }
 const tiny=c=>c.kind==='individual'?'Ind. '+((/individuale\s+(\S+)/i.exec(c.name)||[])[1]||''):c.level+(c.kind==='group'?' Gr':' Cv');
@@ -1424,7 +1459,49 @@ async function adminMonth(m){
       L.length>3?h('span',{class:'mmore'},'+'+(L.length-3)):null));
   }
   const exp=h('button',{class:'secondary',onclick:()=>exportMonth(first,last)},'⬇ Esporta mese con presenze (CSV)');
-  mount(aHeader(),h('h2',{class:'sect'},'Calendario'),base.pick,nav,h('div',{class:'mgrid'},cells),exp,aTabs('cal'),footer());
+  const add=h('button',{class:'primary',onclick:()=>adminAddLesson(isoD(new Date()),()=>adminMonth(first))},'+ Aggiungi lezione');
+  mount(aHeader(),h('h2',{class:'sect'},'Calendario'),base.pick,add,nav,h('div',{class:'mgrid'},cells),exp,aTabs('cal'),footer());
+}
+async function adminAddLesson(dateStr,back){
+  const cs=(A.ov.courses||[]).filter(c=>c.active!==false&&!c.archived).slice().sort((p,q)=>shortName(p).localeCompare(shortName(q)));
+  const cls=selEl(cs.map(c=>[c.id,shortName(c)]),cs[0]&&cs[0].id,'Classe');
+  const parse0=q=>{const p=q.split('-').map(Number);return new Date(p[0],p[1]-1,p[2])};
+  const date=h('input',{class:'txt',type:'date',value:dateStr});
+  const st=h('input',{class:'txt',type:'time'}),en=h('input',{class:'txt',type:'time'});
+  const sec=h('select',{class:'txt sel','aria-label':'Turno'},[['','Nessun turno'],['morning','Mattina'],['evening','Sera']].map(([v,t])=>h('option',{value:v},t)));
+  const place=h('input',{class:'txt',type:'text',value:'Online',maxlength:'80'});
+  const weeks=h('input',{class:'txt',type:'number',min:'1',max:'52',value:'1'});
+  const dn=['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
+  const dchk=dn.map((n,i)=>{const cb=h('input',{type:'checkbox'});return {cb,i,el:h('label',{class:'att-chk'},cb,n)}});
+  const sync=()=>{const wd=(parse0(date.value||dateStr).getDay()+6)%7;dchk.forEach(d=>d.cb.checked=(d.i===wd))};
+  date.addEventListener('change',sync);sync();
+  const err=h('p',{class:'err',role:'alert'});
+  const save=h('button',{class:'primary',onclick:async()=>{
+    err.textContent='';
+    if(!cls.value){err.textContent='Scegli la classe.';return}
+    if(!date.value||!st.value){err.textContent='Inserisci data e ora di inizio.';return}
+    if(en.value&&en.value<=st.value){err.textContent='La fine deve essere dopo l’inizio.';return}
+    save.disabled=true;
+    const cr=await sb.from('courses').select('school_id').eq('id',cls.value).maybeSingle();
+    if(!cr.data){err.textContent='Classe non trovata.';save.disabled=false;return}
+    const m=q=>parseInt(q.slice(0,2))*60+parseInt(q.slice(3));
+    const base={start_time:st.value,end_time:en.value||null,place:place.value.trim()||null,duration_min:en.value?m(en.value)-m(st.value):60,section:sec.value};
+    const n=Math.max(1,Math.min(52,parseInt(weeks.value,10)||1));
+    const d0=parse0(date.value);const mon0=new Date(d0);mon0.setDate(mon0.getDate()-((mon0.getDay()+6)%7));
+    const rows=[];
+    for(let w=0;w<n;w++)dchk.filter(d=>d.cb.checked).forEach(d=>{const dd=new Date(mon0);dd.setDate(dd.getDate()+7*w+d.i);if(dd>=d0)rows.push({...base,school_id:cr.data.school_id,course_id:cls.value,session_date:isoD(dd),kind:'regular',status:'scheduled'})});
+    if(!rows.length){err.textContent='Scegli almeno un giorno.';save.disabled=false;return}
+    const {error}=await sb.from('lesson_sessions').upsert(rows,{onConflict:'course_id,section,session_date,kind',ignoreDuplicates:true});
+    if(error){err.textContent='Non salvato: '+error.message;save.disabled=false;return}
+    back();
+  }},'Salva');
+  mount(topbar('Aggiungi lezione',back),h('div',{class:'card'},
+    h('p',{class:'sub small'},'Puoi programmare la lezione anche se alla classe non è ancora stato assegnato un docente.'),
+    h('label',null,'Classe',cls),h('label',null,'Data',date),
+    h('div',{class:'row'},h('label',null,'Inizio',st),h('label',null,'Fine',en)),
+    h('label',null,'Turno (solo per i corsi di gruppo)',sec),h('label',null,'Dove',place),
+    h('div',null,h('p',{class:'sub small'},'Ripeti nei giorni (a partire dalla data scelta):'),h('div',{class:'row'},dchk.map(d=>d.el)),h('label',null,'Per quante settimane (compresa la prima)',weeks)),
+    save,err),footer());
 }
 async function adminDay(d){
   d=new Date(d);d.setHours(12,0,0,0);
@@ -1438,7 +1515,8 @@ async function adminDay(d){
     h('strong',{class:'weeklab'},GIORNI[d.getDay()]+' '+d.getDate()+' '+MESI[d.getMonth()]),
     h('button',{class:'linkbtn small',onclick:()=>step(1)},'Giorno dopo ›'));
   base.pick.addEventListener('change',()=>{A.calT=base.pick.value;adminDay(d)});
-  mount(aHeader(),nav,base.pick,data.sessions.length?data.sessions.map(x=>tLessonCard(x,data.cname[x.course_id],data.courses)):h('p',{class:'sub'},'Nessuna lezione in questo giorno.'),aTabs('cal'),footer());
+  const addD=h('button',{class:'primary',onclick:()=>adminAddLesson(isoD(d),()=>adminDay(d))},'+ Aggiungi lezione');
+  mount(aHeader(),nav,base.pick,addD,data.sessions.length?data.sessions.map(x=>tLessonCard(x,data.cname[x.course_id],data.courses)):h('p',{class:'sub'},'Nessuna lezione in questo giorno.'),aTabs('cal'),footer());
 }
 async function exportMonth(first,last){
   const wait=h('p',{class:'sub'},'Preparo il file…');
@@ -1449,7 +1527,7 @@ async function exportMonth(first,last){
       sb.from('courses').select('id,name,teacher_id'),
       sb.from('lesson_sessions').select('id,course_id,session_date,start_time,end_time,status,attendance(status,camera_off,mic_off,teacher_note,students(display_name))').gte('session_date',isoD(first)).lte('session_date',isoD(last)).order('session_date').order('start_time')]);
     if(cs.error||ss.error)throw (cs.error||ss.error);
-    const cn={};cs.data.filter(c=>!A.calT||c.teacher_id===A.calT).forEach(c=>cn[c.id]=c);
+    const cn={};cs.data.filter(calOk).forEach(c=>cn[c.id]=c);
     const ST={present:'Presente',absent:'Assente',absent_notified:'Assente avvisato'};
     const q=v=>{v=v==null?'':String(v);return /[;"\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
     const rows=[['Data','Inizio','Fine','Corso','Docente','Alunno','Presenza','Camera spenta','Mic spento','Nota docente']];
@@ -1481,7 +1559,7 @@ function tHeader(){
   if(isAdm())return aHeader();
   return h('div',{class:'thead2'},h('div',{class:'thead-top'},
     h('img',{class:'logo-sm',src:'icons/logo.png',alt:'Esmet Academy'}),
-    h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:tDrawer},ico('menu'))));
+    h('div',{class:'row',style:'gap:8px'},bellBtn(true,()=>teacherHome()),h('button',{class:'icon-btn',style:'background:var(--sand)','aria-label':'Menu',onclick:tDrawer},ico('menu')))));
 }
 function tTabs(active){
   if(isAdm())return aTabs('cal');

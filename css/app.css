@@ -190,3 +190,6 @@ label.chk{flex-direction:row;color:var(--ink)}
 .formbar{display:flex;gap:8px;align-items:center;margin:18px 0 8px;position:sticky;bottom:78px;background:var(--bg,#fff);padding:8px 0}
 .danger{background:#d33;color:#fff;border:0;border-radius:999px;padding:10px 18px;font:inherit;font-weight:700;cursor:pointer}
 .secondary.sm{flex:none;width:auto;padding:6px 12px;font-size:.85rem;margin-left:auto}
+.bdot{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:#c0392b;color:#fff;font-size:11px;line-height:18px;text-align:center;padding:0 4px;font-weight:700}
+.notif.unread{border-left:4px solid #c0392b}
+.notif .sub{display:block}
