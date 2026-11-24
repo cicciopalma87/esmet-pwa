@@ -1072,7 +1072,8 @@ function adminAlunni(){
       const cb=h('input',{type:'checkbox','aria-label':'Seleziona '+s.name});cb.checked=A.sel.has(s.id);
       cb.addEventListener('change',()=>{cb.checked?A.sel.add(s.id):A.sel.delete(s.id);drawBar()});
       return h('label',{class:'chk-row'},cb,h('span',{style:'flex:1'},h('strong',null,s.name),' ',h('span',{class:'sub small'},s.code+(s.has_account?' · account email':'')),
-        h('br'),s.course_ids.length?s.course_ids.map(i=>h('span',{class:'ctag'},courseName(i))):h('span',{class:'sub small'},'nessuna classe')));
+        h('br'),s.course_ids.length?s.course_ids.map(i=>h('span',{class:'ctag'},courseName(i))):h('span',{class:'sub small'},'nessuna classe')),
+        s.active===false?h('span',{class:'tag'},'non attivo'):null,h('button',{class:'secondary sm',onclick:e=>{e.preventDefault();studentDetail(s.id)}},'Modifica'));
     }));
     if(!list.children.length)list.append(h('p',{class:'sub'},'Nessun alunno.'));
   };
@@ -1146,10 +1147,10 @@ function adminClassi(){
     box.replaceChildren(...(L.length?L:[null]).map(c=>{
       if(!c)return h('p',{class:'sub'},'Nessuna classe con questi filtri.');
       const stu=A.ov.students.filter(s=>s.course_ids.includes(c.id));
-      return h('div',{class:'card'},h('h3',null,shortName(c)),
+      return h('div',{class:'card'},h('h3',null,shortName(c),c.active===false?h('span',{class:'tag'},'non attiva'):null),
         h('p',{class:'sub small'},KL[c.kind]+' · '+c.level+' · '+c.language+(c.teacher?'':' · docente non assegnato')),
         h('p',{class:'sub small'},stu.length?stu.length+' alunni: '+stu.map(s=>s.name).join(', '):'Nessun alunno'),
-        h('button',{class:'secondary',onclick:()=>changeTeacher(c)},'Cambia docente'));
+        h('div',{class:'row'},h('button',{class:'secondary',onclick:()=>courseDetail(c.id)},'Modifica'),h('button',{class:'secondary',onclick:()=>changeTeacher(c)},'Cambia docente')));
     }));
   };
   kd.addEventListener('change',draw);dc.addEventListener('change',draw);draw();
@@ -1176,7 +1177,7 @@ function adminDocenti(){
     h('p',{class:'sub small'},(p.email||'')+' · '+(p.languages||[]).join(', ')),
     h('p',{class:'sub small'},...(p.courses.length?p.courses.map(c=>h('span',{class:'ctag'},courseName(c.id,true))):['Nessuna classe assegnata'])),
     p.blocked?h('p',{class:'err'},'Accesso bloccato'):null,
-    p.role==='teacher'?h('div',{class:'row'},h('button',{class:'secondary',onclick:()=>inviteDlg(p)},'Modifica lingue e classi'),
+    p.role==='teacher'?h('div',{class:'row'},h('button',{class:'secondary',onclick:()=>staffDetail(p.id)},'Modifica'),
       h('button',{class:'secondary',onclick:async()=>{
         if(!await askYes(p.blocked?'Sblocca accesso':'Blocca accesso',p.blocked?p.name+' potrà di nuovo entrare nell’app.':p.name+' non potrà più entrare né vedere corsi e alunni. Le sue classi e i dati restano. Puoi sbloccarlo quando vuoi.',p.blocked?'Sblocca':'Blocca'))return;
         const {error}=await sb.rpc('admin_set_staff_blocked',{p_id:p.id,p_blocked:!p.blocked});
@@ -1256,6 +1257,85 @@ async function inviteDlg(p){
   }catch(e){return say('Errore',e.message||String(e))}
   if(!edit)await inviteMsg(em.value.trim().toLowerCase(),nm.value);
   adminHome('docenti');
+}
+
+/* ---------- schede anagrafiche: modifica / elimina ---------- */
+function fld(label,el){return h('div',{class:'fld2'},h('label',{class:'sub small'},label),el)}
+function formPage(title,tab,backFn,blocks,onSave,onDelete){
+  const err=h('p',{class:'err',role:'alert'});
+  const save=h('button',{class:'primary',onclick:async()=>{err.textContent='';save.disabled=true;try{await onSave()}catch(e){err.textContent=e.message||String(e);save.disabled=false}}},'Salva');
+  const bar=h('div',{class:'formbar'},
+    onDelete?h('button',{class:'danger',onclick:onDelete},'Elimina'):h('span'),
+    h('span',{style:'flex:1'}),h('button',{class:'secondary',onclick:backFn},'Annulla'),save);
+  mount(aHeader(),h('div',{class:'row'},h('button',{class:'icon-btn','aria-label':'Indietro',onclick:backFn},ico('back')),h('h2',{class:'sect',style:'margin:0'},title)),...blocks,err,bar,aTabs(tab),footer());
+}
+async function confirmDelete(what,detail){
+  return askYes('Eliminare '+what+'?','Sei sicuro? Questa azione è irreversibile. '+detail,'Elimina definitivamente');
+}
+async function studentDetail(id){
+  mount(aHeader(),h('p',{class:'sub'},'Caricamento…'),aTabs('alunni'));
+  const r=await sb.rpc('admin_student_detail',{p_id:id});
+  if(r.error)return say('Errore',r.error.message).then(()=>adminHome('alunni'));
+  const s=r.data;
+  const nm=h('input',{class:'txt',type:'text',value:s.name});
+  const ph=h('input',{class:'txt',type:'tel',value:s.phone||'',placeholder:'Telefono'});
+  const ci=h('input',{class:'txt',type:'text',value:s.city||''});
+  const bd=h('input',{class:'txt',type:'date',value:s.birth||''});
+  const ac=selEl([['1','Attivo'],['0','Non attivo (non può più entrare, lo storico resta)']],s.active?'1':'0','Stato');
+  const nt=h('textarea',{class:'txt',rows:'4',maxlength:'2000',placeholder:'Note interne (visibili solo all’amministrazione)'});nt.value=s.notes||'';
+  const storico=s.courses.length?s.courses.map(c=>h('div',{class:'card'},h('strong',null,courseName(c.course_id)),
+    h('p',{class:'sub small'},'Dal '+fmtDate(c.since).slice(0,10)+' · presenze '+c.present+' · assenze '+c.absent+(c.takes_exam?'':' · non sostiene l’esame')))):[h('p',{class:'sub small'},'Nessuna classe.')];
+  const acc=h('div',{class:'card'},h('p',{class:'sub small'},'Codice alunno: ',h('strong',null,s.code)),
+    h('p',{class:'sub small'},s.has_account?'Accesso con email: '+(s.email||''):'Non ha ancora creato email e password.'),
+    h('p',{class:'sub small'},s.consent_at?'Informativa accettata il '+fmtDate(s.consent_at).slice(0,10):'Informativa non ancora accettata.'),
+    h('button',{class:'secondary',onclick:()=>showCode({name:s.name,code:s.code})},'Messaggio con il codice'));
+  formPage(s.name,'alunni',()=>adminHome('alunni'),[
+    fld('Nome e cognome',nm),fld('Telefono',ph),fld('Città',ci),fld('Data di nascita',bd),fld('Stato',ac),fld('Note',nt),
+    h('h3',null,'Accesso'),acc,h('h3',null,'Storico corsi'),...storico,
+    h('h3',null,'Esami'),h('p',{class:'sub small'},'Lo storico degli esami comparirà qui. Esercizi svolti finora: '+s.results+'.')],
+    async()=>{const x=await sb.rpc('admin_update_student',{p_id:id,p_name:nm.value,p_phone:ph.value,p_city:ci.value,p_birth:bd.value||null,p_notes:nt.value,p_active:ac.value==='1'});if(x.error)throw x.error;adminHome('alunni')},
+    async()=>{if(!await confirmDelete(s.name,'Si cancellano anche presenze, risultati degli esercizi e accesso. Se vuoi solo che non entri più, imposta “Non attivo”: lo storico resta.'))return;
+      const x=await sb.rpc('admin_delete_student',{p_id:id});if(x.error)return say('Errore',x.error.message);adminHome('alunni')});
+}
+async function staffDetail(id){
+  mount(aHeader(),h('p',{class:'sub'},'Caricamento…'),aTabs('docenti'));
+  const r=await sb.rpc('admin_staff_detail',{p_id:id});
+  if(r.error)return say('Errore',r.error.message).then(()=>adminHome('docenti'));
+  const p=r.data;
+  const nm=h('input',{class:'txt',type:'text',value:p.name});
+  const em=h('input',{class:'txt',type:'text',value:p.email||'',readonly:true});
+  const ph=h('input',{class:'txt',type:'tel',value:p.phone||''});
+  const nt=h('textarea',{class:'txt',rows:'4',maxlength:'2000',placeholder:'Note interne'});nt.value=p.notes||'';
+  const lgs=LANGS.map(l=>{const c=h('input',{type:'checkbox'});c.checked=(p.languages||[]).includes(l);return [l,c]});
+  const cls=p.courses.length?p.courses.map(c=>h('span',{class:'ctag'},courseName(c.id,true)+' · '+c.students+' alunni')):[h('p',{class:'sub small'},'Nessuna classe assegnata.')];
+  const sp=A.staff.staff.find(x=>x.id===id);
+  formPage(p.name,'docenti',()=>adminHome('docenti'),[
+    fld('Nome e cognome',nm),fld('Email (accesso)',em),fld('Telefono',ph),h('p',{class:'sub small fld'},'Lingue insegnate'),...lgs.map(([l,c])=>h('label',{class:'chk-row'},c,l)),fld('Note',nt),
+    h('h3',null,'Classi'),h('div',null,...cls),sp?h('button',{class:'secondary',onclick:()=>inviteDlg(sp)},'Gestisci classi'):null,
+    p.blocked?h('p',{class:'err'},'Accesso bloccato. Si sblocca dall’elenco docenti.'):null],
+    async()=>{const x=await sb.rpc('admin_update_teacher',{p_id:id,p_name:nm.value,p_phone:ph.value,p_notes:nt.value,p_languages:lgs.filter(y=>y[1].checked).map(y=>y[0])});if(x.error)throw x.error;adminHome('docenti')},
+    async()=>{if(!await confirmDelete(p.name,'Il docente perde l’accesso. Le sue '+p.courses.length+' classi restano, senza docente, con alunni e lezioni. Per sospenderlo senza eliminarlo usa “Blocca accesso”.'))return;
+      const x=await sb.rpc('admin_delete_teacher',{p_id:id});if(x.error)return say('Errore',x.error.message);adminHome('docenti')});
+}
+async function courseDetail(id){
+  mount(aHeader(),h('p',{class:'sub'},'Caricamento…'),aTabs('classi'));
+  const c=A.ov.courses.find(x=>x.id===id);
+  const r=await sb.rpc('admin_course_stats',{p_id:id});
+  if(!c||r.error)return say('Errore',r.error?r.error.message:'Classe non trovata').then(()=>adminHome('classi'));
+  const st=r.data;
+  const nm=h('input',{class:'txt',type:'text',value:c.name});
+  const lv=selEl(LEVELS.map(x=>[x,x]),c.level,'Livello');
+  const lg=selEl(LANGS.map(x=>[x,x]),c.language||'Tedesco','Lingua');
+  const dc=selEl(teacherOpts(),c.teacher_id||'','Docente');
+  const ac=selEl([['1','Attiva'],['0','Non attiva (archiviata)']],c.active===false?'0':'1','Stato');
+  const stu=A.ov.students.filter(s=>s.course_ids.includes(id));
+  formPage(shortName(c),'classi',()=>adminHome('classi'),[
+    fld('Nome',nm),fld('Tipo',h('input',{class:'txt',type:'text',value:KL[c.kind],readonly:true})),fld('Livello',lv),fld('Lingua',lg),fld('Docente',dc),fld('Stato',ac),
+    h('h3',null,'Contenuti'),h('p',{class:'sub small'},st.students+' alunni · '+st.lessons+' lezioni caricate · '+st.sessions+' lezioni in calendario · '+st.whiteboards+' lavagne · '+st.announcements+' avvisi'),
+    h('h3',null,'Alunni'),h('div',null,...(stu.length?stu.map(s=>h('span',{class:'ctag'},s.name)):[h('p',{class:'sub small'},'Nessun alunno.')]))],
+    async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:ac.value==='1'});if(x.error)throw x.error;adminHome('classi')},
+    async()=>{if(!await confirmDelete('la classe '+shortName(c,true),'Si cancellano anche '+st.lessons+' lezioni caricate, '+st.sessions+' lezioni in calendario, '+st.whiteboards+' lavagne e '+st.announcements+' avvisi; gli '+st.students+' alunni restano ma escono dalla classe. Per archiviarla senza perdere nulla imposta “Non attiva”.'))return;
+      const x=await sb.rpc('admin_delete_course',{p_id:id});if(x.error)return say('Errore',x.error.message);adminHome('classi')});
 }
 
 /* calendario amministratore: mese a quadrati → giorno → presenze */
