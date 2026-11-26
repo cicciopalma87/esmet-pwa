@@ -1092,6 +1092,7 @@ async function adminLoad(){
   const [o,s]=await Promise.all([sb.rpc('admin_overview'),sb.rpc('admin_staff_list')]);
   if(o.error||s.error)throw (o.error||s.error);
   A.ov=o.data;A.staff=s.data;
+  A.ov.courses=sortCourses(A.ov.courses||[]);
   try{const sd=await sb.from('courses').select('id,start_date');const m={};(sd.data||[]).forEach(x=>m[x.id]=x.start_date);(A.ov.courses||[]).forEach(c=>{c.start_date=m[c.id]||c.start_date||null})}catch(e){}
 }
 async function adminHome(tab){
@@ -1102,7 +1103,7 @@ async function adminHome(tab){
   mount(aHeader(),subNav([['alunni','Alunni',()=>adminHome('alunni')],['classi','Classi',()=>adminHome('classi')],['docenti','Docenti',()=>adminHome('docenti')]],tab),body,aTabs(tab));
 }
 const courseName=(id,noT)=>{const c=A.ov.courses.find(x=>x.id===id);return c?shortName(c,noT):'?'};
-const KL={group:'Gruppo',individual:'Individuale',conversation:'Conversazione'};
+const KL={group:'Gruppo',conversation:'Conversazione',individual:'Individuale'};
 const LEVELS=['A1','A2','B1','B2','C1','C2'];
 function shortName(c,noT){
   const lg=c.language&&c.language!=='Tedesco'?c.language+' · ':'';
@@ -1115,7 +1116,7 @@ function lab(t){return h('p',{class:'sub small fld'},t)}
 /* selezione a cascata: Lingua → Docente → Tipo → Livello */
 function classPicker(o){
   o=o||{};
-  const kinds=o.noIndividual?['group','conversation']:['group','individual','conversation'];
+  const kinds=o.noIndividual?['group','conversation']:['group','conversation','individual'];
   const lg=selEl(LANGS.map(x=>[x,x]),'Tedesco','Lingua');
   const dc=selEl([],'__','Docente');
   const kd=selEl(kinds.map(k=>[k,KL[k]]),'group','Tipo di corso');
@@ -1768,7 +1769,7 @@ async function sessionForm(courses,x,weekMon,acceptStudent){
     indiv=Object.entries(seen).map(([id,name])=>({id,name}));
   }
   const lang=h('select',{class:'txt sel','aria-label':'Lingua'},langs.map(l=>h('option',{value:l},l)));
-  const tipo=h('select',{class:'txt sel','aria-label':'Tipo di corso'},[['individual','Corso individuale'],['group','Corso di gruppo']].map(([v,t])=>h('option',{value:v},t)));
+  const tipo=h('select',{class:'txt sel','aria-label':'Tipo di corso'},[['group','Corso di gruppo'],['individual','Corso individuale']].map(([v,t])=>h('option',{value:v},t)));
   const sub=h('select',{class:'txt sel','aria-label':'Alunno o livello'});
   const grp=h('select',{class:'txt sel','aria-label':'Gruppo'});
   const grpWrap=h('label',{hidden:'hidden'},'Gruppo',grp);
