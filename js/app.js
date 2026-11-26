@@ -865,21 +865,24 @@ async function teacherHome(){
   S.prev=null;
   mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),h('p',{class:'sub'},'Caricamento…'),tTabs('corsi'));
   const [cs,en]=await Promise.all([
-    sb.from('courses').select('id,school_id,name,level,kind,zoom_url,chat_url').eq('active',true).order('name'),
+    sb.from('courses').select('id,school_id,name,level,kind,language,zoom_url,chat_url').eq('active',true).order('name'),
     sb.from('enrollments').select('course_id,section,students(id,display_name,code,consent_at)')
   ]);
   if(cs.error||en.error)return mount(tHeader(),h('p',{class:'err'},'Errore nel caricamento. Il tuo account ha un profilo docente?'),tTabs('corsi'),footer());
-  const blocks=cs.data.map(c=>{
+  const csSorted=sortCourses(cs.data);
+  const homeC=csSorted.find(x=>x.id===S.homeC)||csSorted[0];
+  const casc=csSorted.length>1?courseCascade(csSorted,homeC&&homeC.id,n=>{S.homeC=n.id;teacherHome()}):null;
+  const blocks=csSorted.filter(c=>!casc||c.id===homeC.id).map(c=>{
     const studs=en.data.filter(e=>e.course_id===c.id&&e.students).sort((a,b)=>a.students.display_name.localeCompare(b.students.display_name));
     return h('section',{class:'card'},h('h2',null,c.name),h('p',{class:'sub'},c.level+' · '+studs.length+' studenti'),
       h('div',{class:'rows'},studs.map(e=>h('button',{class:'row-item',onclick:()=>studentSheet(e.students,c)},
         h('span',{class:'ri-l'},e.students.display_name,e.section?h('span',{class:'tag'},e.section==='morning'?'mattina':e.section==='evening'?'sera':e.section):null),
         h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
       h('div',{class:'row'},
-        h('button',{class:'primary',onclick:()=>teacherLessons(c,cs.data)},'Lezioni ed esercizi'),h('button',{class:'secondary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
+        h('button',{class:'primary',onclick:()=>teacherLessons(c,csSorted)},'Lezioni ed esercizi'),h('button',{class:'secondary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
         h('button',{class:'secondary',onclick:()=>teacherAnnouncements(c)},'Avvisi'),h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link della chat','Gruppo WhatsApp: incolla il link d’invito. Chat singola: https://wa.me/39… (lascia vuoto per cancellare)',c.chat_url||'','Salva');if(v===null)return;const u=v.trim();if(u&&!/^https:\/\//.test(u)){await say('Link non valido','Il link deve iniziare con https://');return}const {error}=await sb.from('courses').update({chat_url:u||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.chat_url?'Chat ✓':'Chat'),c.chat_url?h('a',{class:'secondary btnlink',href:c.chat_url,target:'_blank',rel:'noopener'},'Apri chat'):null,h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link Zoom del corso','Incolla il link (lascia vuoto per cancellarlo)',c.zoom_url||'','Salva');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso'),h('button',{class:'secondary',onclick:()=>courseHistoryView(c)},'Storico classe')));
   });
-  mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),tTabs('corsi'),footer());
+  mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),casc,blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),tTabs('corsi'),footer());
 }
 
 
@@ -1042,6 +1045,42 @@ function adminConto(sub){
 function selEl(opts,val,label){
   const s=h('select',{class:'txt','aria-label':label||''},...opts.map(o=>h('option',{value:o[0]},o[1])));
   s.value=val==null?'':val;return s;
+}
+/* ordine di visualizzazione dei corsi: prima i gruppi, poi le conversazioni, poi gli individuali */
+const KORD={group:0,conversation:1,individual:2};
+function sortCourses(list){
+  return (list||[]).slice().sort((a,b)=>(KORD[a.kind]??9)-(KORD[b.kind]??9)||(LEVELS.indexOf(a.level)-LEVELS.indexOf(b.level))||String(a.name).localeCompare(String(b.name)));
+}
+/* tre menù a cascata: Lingua → Tipologia → Livello (e, solo se restano più corsi, il corso) */
+function courseCascade(list,curId,onPick,opts){
+  opts=opts||{};
+  const all=sortCourses(list);
+  const cur=all.find(x=>x.id===curId)||all[0];
+  const wrap=h('div',{class:'casc'});
+  const st={lang:cur&&(cur.language||'Tedesco'),kind:cur&&cur.kind,level:cur&&cur.level,id:cur&&cur.id};
+  const draw=()=>{
+    const langs=[...new Set(all.map(x=>x.language||'Tedesco'))];
+    if(!langs.includes(st.lang))st.lang=langs[0];
+    const inL=all.filter(x=>(x.language||'Tedesco')===st.lang);
+    const kinds=[...new Set(inL.map(x=>x.kind))].sort((a,b)=>(KORD[a]??9)-(KORD[b]??9));
+    if(!kinds.includes(st.kind))st.kind=kinds[0];
+    const inK=inL.filter(x=>x.kind===st.kind);
+    const levels=[...new Set(inK.map(x=>x.level))].sort((a,b)=>LEVELS.indexOf(a)-LEVELS.indexOf(b));
+    if(!levels.includes(st.level))st.level=levels[0];
+    const match=inK.filter(x=>x.level===st.level);
+    if(!match.find(x=>x.id===st.id))st.id=match[0]&&match[0].id;
+    const mk=(label,vals,val,txt,fn)=>{const e=selEl(vals.map(v=>[v,txt(v)]),val,label);e.disabled=vals.length<2;e.onchange=()=>fn(e.value);return h('label',{class:'small'},label,e)};
+    const parts=[
+      mk('Lingua',langs,st.lang,v=>v,v=>{st.lang=v;st.kind=null;st.level=null;st.id=null;draw();fire()}),
+      mk('Tipologia',kinds,st.kind,v=>KL[v]||v,v=>{st.kind=v;st.level=null;st.id=null;draw();fire()}),
+      mk('Livello',levels,st.level,v=>v,v=>{st.level=v;st.id=null;draw();fire()})];
+    if(match.length>1)parts.push(mk('Corso',match.map(x=>x.id),st.id,v=>{const x=match.find(y=>y.id===v);return opts.label?opts.label(x):x.name},v=>{st.id=v;fire()}));
+    wrap.replaceChildren(...parts);
+  };
+  let first=true;
+  const fire=()=>{const c=all.find(x=>x.id===st.id);if(c&&onPick)onPick(c)};
+  draw();
+  return wrap;
 }
 async function adminLoad(){
   const [o,s]=await Promise.all([sb.rpc('admin_overview'),sb.rpc('admin_staff_list')]);
@@ -1504,7 +1543,8 @@ async function adminMonth(m){
 }
 async function adminAddLesson(dateStr,back){
   const cs=(A.ov.courses||[]).filter(c=>c.active!==false&&!c.archived).slice().sort((p,q)=>shortName(p).localeCompare(shortName(q)));
-  const cls=selEl(cs.map(c=>[c.id,shortName(c)]),cs[0]&&cs[0].id,'Classe');
+  const csS=sortCourses(cs);
+  const cls=selEl(csS.map(c=>[c.id,shortName(c)]),csS[0]&&csS[0].id,'Classe');
   const parse0=q=>{const p=q.split('-').map(Number);return new Date(p[0],p[1]-1,p[2])};
   const date=h('input',{class:'txt',type:'date',value:dateStr});
   const st=h('input',{class:'txt',type:'time'}),en=h('input',{class:'txt',type:'time'});
@@ -2070,8 +2110,7 @@ async function teacherLessons(c,all){
   const r=await sb.rpc('teacher_lessons_overview',{p_course:c.id});
   if(r.error)return mount(topbar('Lezioni ed esercizi',back),h('p',{class:'err'},'Errore nel caricamento.'),footer());
   const ls=r.data||[];
-  const pick=all.length>1?selEl(all.map(x=>[x.id,x.name]),c.id,'Classe'):null;
-  if(pick)pick.onchange=()=>teacherLessons(all.find(x=>x.id===pick.value),all);
+  const pick=all.length>1?courseCascade(all,c.id,n=>teacherLessons(n,all)):null;
   const redo=()=>teacherLessons(c,all);
   const fileIn=h('input',{type:'file',accept:'.html,.htm,.json,.txt,text/html,application/json,text/plain',style:'display:none',onchange:async()=>{
     const f=fileIn.files&&fileIn.files[0];if(!f)return;
@@ -2353,14 +2392,13 @@ const secL=x=>x.section==='morning'?'Mattina':x.section==='evening'?'Sera':(x.st
 function attShell(c,title,backFn,...rest){
   let pick=null;
   if(!isAdm()&&A.tCourses&&A.tCourses.length>1){
-    pick=selEl(A.tCourses.map(x=>[x.id,x.name]),c.id,'Corso');
-    pick.onchange=()=>{const n=A.tCourses.find(x=>x.id===pick.value);if(n){A.regC=n.id;teacherAttendance(n)}};
+    pick=courseCascade(A.tCourses,c.id,n=>{A.regC=n.id;teacherAttendance(n)});
   }
   return mount(isAdm()?aHeader():topbar(title,backFn),isAdm()?h('div',{class:'row'},h('button',{class:'icon-btn','aria-label':'Indietro',onclick:backFn},ico('back')),h('strong',null,title)):pick,...rest,isAdm()?aTabs('cal'):tTabs('reg'),footer());
 }
 async function loadTCourses(){
-  const r=await sb.from('courses').select('id,school_id,name,level,kind,zoom_url,chat_url').eq('active',true).order('name');
-  A.tCourses=r.data||[];return r.error?null:A.tCourses;
+  const r=await sb.from('courses').select('id,school_id,name,level,kind,language,zoom_url,chat_url').eq('active',true).order('name');
+  A.tCourses=sortCourses(r.data||[]);return r.error?null:A.tCourses;
 }
 async function teacherRegistro(){
   if(isAdm())return adminMonth();
