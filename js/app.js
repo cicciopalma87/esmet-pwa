@@ -576,7 +576,7 @@ function lessonView(c,l){
     h('span',{class:'ri-l'},h('span',null,h('span',{class:'kind'},names[e.type]||e.type,e.hw?h('span',{class:'tag'},'compiti'):null),h('br'),e.title)),
     h('span',{class:'ri-r'},h('span',{class:'res'},res[i]?res[i].score+'/'+res[i].total:''),ico('chev'))));
   mount(topbar('Lezione '+l.number,S.prev?S.prev.back:()=>homeView()),
-    S.prev?h('p',{class:'banner'},'Anteprima docente: i risultati non vengono salvati.'):null,
+    S.prev?h('div',{class:'banner'},h('p',null,'Anteprima docente: i risultati non vengono salvati.'),S.prev.fix?h('button',{class:'secondary small',onclick:S.prev.fix},'Correggi testi'):null):null,
     h('p',{class:'sub'},l.title),
     h('div',{class:'rows'},rows),
     footer());
@@ -1984,7 +1984,7 @@ async function teacherLessons(c,all){
     const f=fileIn.files&&fileIn.files[0];if(!f)return;
     let txt;try{txt=await f.text()}catch(e){return say('File non leggibile','Non riesco a leggere il file. Riprova.')}
     lessonImportPreview(c,all,ls,txt,f.name)}});
-  const others=all.filter(x=>x.id!==c.id&&x.level===c.level);
+  const others=all.filter(x=>x.id!==c.id&&x.level===c.level&&x.kind===c.kind);
   const copyBtn=others.length?h('button',{class:'secondary',onclick:async()=>{
     const sel=selEl(others.map(x=>[x.id,x.name]),others[0].id,'Classe da cui copiare');
     const list=h('div',{class:'rows'});let boxes=[];
@@ -2011,14 +2011,14 @@ async function teacherLessons(c,all){
   }},'Copia lezioni da un’altra classe'):null;
   const card=l=>{
     const act=[];
-    act.push(h('button',{class:'secondary',onclick:()=>{S.prev={back:()=>{S.prev=null;redo()}};lessonView(c,{id:l.id,number:l.number,title:l.title,content:l.content})}},'Anteprima'));
+    const openPrev=cur=>{S.prev={back:()=>{S.prev=null;redo()},fix:()=>lessonTextFix(c,all,cur,nc=>{cur.content=nc;l.content=nc;openPrev(cur)})};lessonView(c,{id:cur.id,number:cur.number,title:cur.title,content:cur.content})};
+    act.push(h('button',{class:'secondary',onclick:()=>openPrev(l)},'Anteprima'));
     act.push(h('button',{class:l.published?'secondary':'primary',onclick:async()=>{
       if(l.published&&l.n_access&&!await askYes('Rimettere in bozza?','La lezione è sbloccata per '+l.n_access+' alunni: non la vedranno più finché non la ripubblichi.','Rimetti in bozza'))return;
       const x=await sb.rpc('teacher_set_lesson_published',{p_lesson:l.id,p_pub:!l.published});
       if(x.error)return say('Non riuscito',errIt(x.error));
       if(!l.published)await say('Pubblicata','La lezione è pronta. Per farla vedere agli alunni usa «Sblocca lezioni».');
       redo()}},l.published?'Rimetti in bozza':'Pubblica'));
-    if(!l.published&&!l.has_results)act.push(h('button',{class:'secondary',onclick:()=>lessonTextFix(c,all,l)},'Correggi testi'));
     act.push(h('button',{class:'secondary',onclick:async()=>{
       const v=await askText('Titolo della lezione '+l.number,'Cambia il titolo come preferisci.',l.title,'Salva');
       if(v==null)return;const t=v.trim();if(!t||t===l.title)return;
@@ -2037,15 +2037,16 @@ async function teacherLessons(c,all){
     pick,
     h('p',{class:'sub'},c.name),
     h('div',{class:'row'},h('button',{class:'primary',onclick:()=>fileIn.click()},'Carica lezioni da file'),copyBtn),fileIn,
-    others.length?h('p',{class:'sub small'},'«Copia lezioni» propone solo classi dello stesso livello ('+c.level+').'):null,
+    others.length?h('p',{class:'sub small'},'«Copia lezioni» propone solo classi dello stesso livello ('+c.level+') e della stessa tipologia ('+(c.kind==='group'?'di gruppo':'individuali')+') e dello stesso docente.'):null,
     h('p',{class:'sub small'},'Le lezioni caricate restano in bozza finché non le pubblichi: provale con «Anteprima», cambia i titoli e poi pubblica. Quando gli alunni hanno già svolto degli esercizi, quelli non si possono più cambiare: puoi solo rinominare la lezione o aggiungere esercizi in fondo.'),
     ls.length?ls.map(card):h('p',{class:'sub'},'Nessuna lezione in questa classe.'),
     footer());
 }
 /* ---- anteprima dell’importazione ---- */
 /* correzione rapida dei testi di una lezione in bozza (refusi); le modifiche strutturali verranno con l'editor a blocchi */
-function lessonTextFix(c,all,l){
+function lessonTextFix(c,all,l,onSaved){
   const back=()=>teacherLessons(c,all);
+  const ret=()=>onSaved?onSaved(content):back();
   const content=JSON.parse(JSON.stringify(l.content||{exercises:[]}));
   const LAB={title:'Titolo',instr:'Istruzioni',lab:'Etichetta',t:'Testo',l:'Sinistra',r:'Destra',q:'Domanda',a:'Risposta corretta',w:'Risposta sbagliata',pre:'Prima',ans:'Parola',post:'Dopo',s:'Frase',f:'Fronte',b:'Retro',cols:'Colonna',groups:'Gruppo'};
   const KEEP=new Set(['pre','post']);
@@ -2082,14 +2083,14 @@ function lessonTextFix(c,all,l){
       if(!v.trim()&&f.orig.trim()){err.textContent='«'+f.label+'» non può restare vuoto.';f.inp.focus();return}
       if(f.idx==null)f.obj[f.key]=v;else f.obj[f.key][f.idx]=v;n++;
     }
-    if(!n)return back();
+    if(!n)return ret();
     const x=await sb.from('lessons').update({content}).eq('id',l.id);
     if(x.error){err.textContent='Non salvato: '+errIt(x.error);return}
-    await say('Salvato',n+(n===1?' testo corretto.':' testi corretti.')+' La versione precedente resta ripristinabile.');back();
+    await say('Salvato',n+(n===1?' testo corretto.':' testi corretti.')+' La versione precedente resta ripristinabile.');ret();
   };
-  mount(topbar('Correggi testi · lezione '+l.number,back),
-    h('p',{class:'sub small'},'Correggi refusi nel titolo e nei testi degli esercizi. Qui non si aggiungono né si tolgono righe: per quello ci sarà l’editor a blocchi. Usa «Anteprima» per controllare il risultato.'),
-    blocks,err,h('div',{class:'row'},h('button',{class:'primary',onclick:save},'Salva correzioni'),h('button',{class:'secondary',onclick:back},'Annulla')),footer());
+  mount(topbar('Correggi testi · lezione '+l.number,ret),
+    h('p',{class:'sub small'},'Correggi refusi nel titolo e nei testi degli esercizi, anche se la lezione è già pubblicata o svolta dagli alunni (i loro risultati restano). Qui non si aggiungono né si tolgono righe e non si cambia il tipo: per quello ci sarà l’editor a blocchi.'+(l.has_results?' Gli alunni hanno già svolto alcuni esercizi: cambia solo i testi sbagliati.':'')),
+    blocks,err,h('div',{class:'row'},h('button',{class:'primary',onclick:save},'Salva correzioni'),h('button',{class:'secondary',onclick:ret},'Annulla')),footer());
 }
 
 function lessonImportPreview(c,all,existing,text,fname,withPatch){
