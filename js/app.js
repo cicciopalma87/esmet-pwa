@@ -1014,6 +1014,7 @@ function aDrawer(){
     h('p',{class:'dr-title'},'Esmet Academy · amministrazione'),
     h('p',{class:'dr-group'},'Anagrafiche'),
     it('🧑‍🎓','Alunni',()=>adminHome('alunni'),1),it('🏫','Classi',()=>adminHome('classi'),1),it('👩‍🏫','Docenti',()=>adminHome('docenti'),1),
+    h('p',{class:'dr-group'},'Comunicazioni'),it('📢','Avvisi',()=>adminAnnouncements(),1),
     h('p',{class:'dr-group'},'Calendario'),it('📅','Calendario e presenze',()=>adminMonth(),1),
     h('p',{class:'dr-group'},'Contabilità'),it('💶','Entrate',()=>adminConto('entrate'),1),it('🧾','Uscite',()=>adminConto('uscite'),1),
     h('hr'),it('🚪','Esci',async()=>{await sb.auth.signOut();teacherLogin()}),
@@ -1776,12 +1777,68 @@ async function sessionForm(courses,x,weekMon,acceptStudent){
 }
 
 
+/* amministratore: avvisi alla scuola (alunni, docenti o tutti) */
+const AUD={students:'Tutti gli alunni',teachers:'Tutti i docenti',all:'Alunni e docenti'};
+async function adminAnnouncements(){
+  const back=()=>adminHome('alunni');
+  mount(aHeader(),h('h2',{class:'sect'},'Avvisi'),h('p',{class:'sub'},'Caricamento…'),aTabs('anag'),footer());
+  const {data:sd}=await sb.auth.getSession();const uid=sd.session&&sd.session.user&&sd.session.user.id;
+  const pr=await sb.from('profiles').select('school_id').eq('id',uid).maybeSingle();
+  const school=pr.data&&pr.data.school_id;
+  const ls=await sb.from('announcements').select('id,title,body,created_at,show_from,show_until,audience').is('course_id',null).order('created_at',{ascending:false}).limit(60);
+  if(ls.error||!school)return mount(aHeader(),h('h2',{class:'sect'},'Avvisi'),h('p',{class:'err'},'Errore nel caricamento.'),aTabs('anag'),footer());
+  const au=h('select',{class:'txt sel','aria-label':'Destinatari'},Object.entries(AUD).map(([v,t])=>h('option',{value:v},t)));
+  const ti=h('input',{class:'txt',type:'text',maxlength:'120',placeholder:'Titolo'});
+  const bo=h('textarea',{class:'txt',rows:'4',maxlength:'1200',placeholder:'Testo (facoltativo)'});
+  const dFrom=h('input',{class:'txt',type:'date',value:isoD(new Date()),'aria-label':'Visibile dal'});
+  const dTo=h('input',{class:'txt',type:'date','aria-label':'Visibile fino al'});
+  const msg=h('p',{role:'status'});
+  const pub=h('button',{class:'primary',onclick:async()=>{
+    if(!ti.value.trim()){msg.className='err';msg.textContent='Scrivi un titolo.';return}
+    if(dTo.value&&dFrom.value&&dTo.value<dFrom.value){msg.className='err';msg.textContent='La data «fino al» è prima di «dal».';return}
+    pub.disabled=true;
+    const {error}=await sb.from('announcements').insert({school_id:school,course_id:null,audience:au.value,title:ti.value.trim(),body:bo.value.trim()||null,show_from:dFrom.value||null,show_until:dTo.value||null});
+    pub.disabled=false;
+    if(error){msg.className='err';msg.textContent='Non pubblicato: '+error.message;return}
+    adminAnnouncements();
+  }},'Pubblica');
+  const today=isoD(new Date());
+  mount(aHeader(),h('h2',{class:'sect'},'Avvisi'),
+    h('div',{class:'card'},h('h3',null,'Nuovo avviso alla scuola'),
+      h('p',{class:'sub small'},'Per una singola classe chiedi al docente di scrivere l’avviso: qui si comunica a tutti gli alunni, a tutti i docenti o a entrambi.'),
+      h('label',null,'Destinatari',au),ti,bo,h('label',null,'Visibile dal',dFrom),h('label',null,'Fino al (facoltativo: senza data resta finché non lo elimini)',dTo),
+      h('p',{class:'sub small'},'Una sola notifica, quando l’avviso diventa visibile. Se lo correggi dopo, nessuna nuova notifica.'),pub,msg),
+    ls.data.length?ls.data.map(a=>{const st=a.show_until&&a.show_until<today?'scaduto':(a.show_from&&a.show_from>today?'programmato':'visibile');
+      return h('div',{class:'card ann'},h('div',{class:'row'},h('strong',null,a.title),h('span',{class:'sub small'},fmtDate(a.created_at))),
+        h('p',{class:'sub small'},'A: '+(AUD[a.audience]||a.audience)),a.body?h('p',{class:'ann-b'},a.body):null,
+        h('p',{class:'sub small'},h('span',{class:'pill '+(st==='visibile'?'g':'n')},st),' '+(a.show_from?'dal '+fmtDate(a.show_from):'')+(a.show_until?' fino al '+fmtDate(a.show_until):' senza scadenza')),
+        h('button',{class:'linkbtn small',onclick:async()=>{
+          const t2=h('input',{class:'txt',type:'text',maxlength:'120',value:a.title,'aria-label':'Titolo'});
+          const b2=h('textarea',{class:'txt',rows:'4',maxlength:'1200','aria-label':'Testo'});b2.value=a.body||'';
+          const f2=h('input',{class:'txt',type:'date',value:a.show_from||'','aria-label':'Visibile dal'});
+          const u2=h('input',{class:'txt',type:'date',value:a.show_until||'','aria-label':'Visibile fino al'});
+          const er=h('p',{class:'err'});
+          const ok=await dlg('Modifica avviso',[h('p',{class:'sub small'},'Destinatari: '+(AUD[a.audience]||a.audience)+'. Nessuna nuova notifica.'),t2,b2,h('label',{class:'small'},'Visibile dal',f2),h('label',{class:'small'},'Fino al (vuoto = nessuna scadenza)',u2),er],close=>[
+            h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),
+            h('button',{class:'primary',onclick:async()=>{
+              if(!t2.value.trim()){er.textContent='Scrivi un titolo.';return}
+              if(u2.value&&f2.value&&u2.value<f2.value){er.textContent='La data «fino al» è prima di «dal».';return}
+              const x=await sb.from('announcements').update({title:t2.value.trim(),body:b2.value.trim()||null,show_from:f2.value||null,show_until:u2.value||null,updated_at:new Date().toISOString()}).eq('id',a.id);
+              if(x.error){er.textContent='Non salvato: '+x.error.message;return}
+              close(true)}},'Salva')]);
+          if(ok)adminAnnouncements()}},'Modifica'),
+        h('button',{class:'linkbtn small',onclick:async()=>{if(!await askYes('Eliminare l’avviso?','Sparisce per tutti i destinatari, notifiche comprese.','Elimina'))return;await sb.from('announcements').delete().eq('id',a.id);adminAnnouncements()}},'Elimina'))}):h('p',{class:'sub'},'Nessun avviso alla scuola.'),
+    aTabs('anag'),footer());
+}
+
 async function teacherAnnouncements(c){
   const back=()=>teacherHome();
   mount(topbar('Avvisi · '+c.name,back),h('p',{class:'sub'},'Caricamento…'));
-  const [ls,cs]=await Promise.all([
+  const [ls,cs,adm]=await Promise.all([
     sb.from('announcements').select('id,title,body,created_at,course_id,show_from,show_until,created_by').eq('course_id',c.id).order('created_at',{ascending:false}).limit(40),
-    sb.from('courses').select('id,school_id,name').eq('active',true)]);
+    sb.from('courses').select('id,school_id,name').eq('active',true),
+    sb.rpc('my_staff_announcements')]);
+  const fromAdm=(adm&&Array.isArray(adm.data))?adm.data:[];
   if(ls.error)return mount(topbar('Avvisi',back),h('p',{class:'err'},'Errore nel caricamento.'),footer());
   const ti=h('input',{class:'txt',type:'text',maxlength:'120',placeholder:'Titolo (es. Lezione di giovedì spostata)'});
   const bo=h('textarea',{class:'txt',rows:'4',maxlength:'1200',placeholder:'Testo (facoltativo)'});
@@ -1800,6 +1857,7 @@ async function teacherAnnouncements(c){
     teacherAnnouncements(c);
   }},'Pubblica');
   mount(topbar('Avvisi · '+c.name,back),
+    fromAdm.length?h('div',{class:'card'},h('h3',null,'Dall’amministrazione'),fromAdm.map(x=>h('div',null,h('strong',null,x.title),x.body?h('p',{class:'ann-b'},x.body):null,h('span',{class:'sub small'},fmtDate(x.created_at)+(x.show_until?' · fino al '+fmtDate(x.show_until):''))))):null,
     h('div',{class:'card'},h('h3',null,'Nuovo avviso'),ti,bo,h('label',null,'Destinatari',scope),h('label',null,'Visibile dal',dFrom),h('label',null,'Fino al (facoltativo: senza data resta finché non lo elimini)',dTo),h('p',{class:'sub small'},'Gli alunni ricevono una sola notifica alla pubblicazione. Poi puoi correggere l’avviso o cambiarne le date senza altre notifiche.'),pub,msg),
     ls.data.map(a=>{const today=isoD(new Date());const st=a.show_until&&a.show_until<today?'scaduto':(a.show_from&&a.show_from>today?'programmato':'visibile');
       return h('div',{class:'card ann'},h('div',{class:'row'},h('strong',null,a.title),h('span',{class:'sub small'},fmtDate(a.created_at))),a.body?h('p',{class:'ann-b'},a.body):null,
