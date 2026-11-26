@@ -200,3 +200,7 @@ label.chk{flex-direction:row;color:var(--ink)}
 .notif-menu .linkbtn{text-align:left;padding:8px 10px}
 .casc{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:8px 0}
 .casc label{display:flex;flex-direction:column;gap:2px}
+.rep-wrap{overflow:auto;max-height:60vh;border:1px solid #ddd;border-radius:10px;background:#fff}
+.rep-tbl{border-collapse:collapse;font-size:13px;min-width:100%}
+.rep-tbl th,.rep-tbl td{padding:6px 10px;border-bottom:1px solid #eee;text-align:left;white-space:nowrap}
+.rep-tbl th{position:sticky;top:0;background:#f5f1e8;z-index:1}

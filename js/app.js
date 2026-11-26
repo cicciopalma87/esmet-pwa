@@ -1018,6 +1018,7 @@ function aDrawer(){
     h('p',{class:'dr-group'},'Anagrafiche'),
     it('🧑‍🎓','Alunni',()=>adminHome('alunni'),1),it('🏫','Classi',()=>adminHome('classi'),1),it('👩‍🏫','Docenti',()=>adminHome('docenti'),1),
     h('p',{class:'dr-group'},'Comunicazioni'),it('📢','Avvisi',()=>adminAnnouncements(),1),
+    h('p',{class:'dr-group'},'Report'),it('📊','Report ed esportazioni',()=>adminReports(),1),
     h('p',{class:'dr-group'},'Calendario'),it('📅','Calendario e presenze',()=>adminMonth(),1),
     h('p',{class:'dr-group'},'Contabilità'),it('💶','Entrate',()=>adminConto('entrate'),1),it('🧾','Uscite',()=>adminConto('uscite'),1),
     h('hr'),it('🚪','Esci',async()=>{await sb.auth.signOut();teacherLogin()}),
@@ -1862,6 +1863,75 @@ async function sessionForm(courses,x,weekMon,acceptStudent){
       save,err),footer());
 }
 
+
+/* ---------- amministratore: report ed esportazioni CSV ---------- */
+const REPORTS={
+  presenze:{t:'Presenze',d:'Presenze, assenze e percentuale per alunno e corso (solo lezioni tenute con presenza segnata).',f:['period','kind','level','course','teacher','student','state']},
+  alunni_corsi:{t:'Corsi frequentati dagli alunni',d:'Per ogni alunno i corsi frequentati, con docente, date e stato.',f:['period','kind','level','course','teacher','student','state']},
+  corsi:{t:'Corsi per livello',d:'Corsi attivi e conclusi con quanti e quali alunni (attuali e totali nello storico).',f:['period','kind','level','course','teacher','student','state']},
+  docenti:{t:'Docenti e classi',d:'Classi assegnate a ogni docente (anche passate), lezioni tenute, blocchi da 10 per le individuali e corso completo da 20.',f:['period','kind','level','course','teacher','student','state']},
+  percorsi:{t:'Percorsi di livello',d:'Alunni che sono passati ai livelli successivi (A1, A2, B1…) con il docente di ogni livello. Cercando un docente: i suoi alunni e dove hanno continuato.',f:['kind','teacher','student','continued']}
+};
+function csvDownload(name,cols,rows){
+  const q=v=>{v=v==null?'':String(v);return /[;"\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+  const csv='﻿'+[cols,...rows].map(r=>r.map(q).join(';')).join('\r\n');
+  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  const a=h('a',{href:url,download:name});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+async function adminReports(pre){
+  if(!A.ov||!A.staff){try{await adminLoad()}catch(e){return mount(aHeader(),h('p',{class:'err'},'Non riesco a caricare i dati.'),aTabs('anag'),footer())}}
+  const R=pre||A.rep||{type:'presenze',v:{}};A.rep=R;
+  const hist=LS.get('esmet_rep_hist',[]);
+  const type=selEl(Object.entries(REPORTS).map(([k,r])=>[k,r.t]),R.type,'Report');
+  const desc=h('p',{class:'sub small'});
+  const f={};
+  const mkSel=(label,opts,val)=>{const e=selEl(opts,val||'',label);return e};
+  f.kind=mkSel('Tipologia',[['','Tutte'],...Object.entries(KL)],R.v.kind);
+  f.level=mkSel('Livello',[['','Tutti'],...LEVELS.map(x=>[x,x])],R.v.level);
+  f.course=mkSel('Corso',[['','Tutti'],...sortCourses(A.ov.courses).map(c=>[c.id,shortName(c)+(c.kind!=='individual'&&c.start_date?' · '+courseLabel(c).split(' - del ')[1]:'')+(c.active===false?' (concluso)':'')])],R.v.course);
+  f.teacher=mkSel('Docente',[['','Tutti'],...A.staff.staff.filter(p=>p.role==='teacher').map(p=>[p.id,p.name])],R.v.teacher);
+  f.state=mkSel('Stato corso',[['all','Attivi e conclusi'],['active','Solo attivi'],['ended','Solo conclusi']],R.v.state||'all');
+  f.continued=mkSel('Alunni',[['','Tutti'],['yes','Solo chi è passato a un livello successivo']],R.v.continued);
+  f.from=h('input',{class:'txt',type:'date',value:R.v.from||'','aria-label':'Dal'});f.to=h('input',{class:'txt',type:'date',value:R.v.to||'','aria-label':'Al'});
+  const dl=h('datalist',{id:'rep-stu'},A.ov.students.map(s=>h('option',{value:s.name})));
+  f.student=h('input',{class:'txt',type:'text',list:'rep-stu',placeholder:'Cerca per nome (vuoto = tutti)','aria-label':'Alunno',value:R.v.studentName||''});
+  const wrap=(label,el,key)=>h('label',{class:'small','data-f':key},label,el);
+  const fields=[wrap('Alunno',f.student,'student'),wrap('Tipologia',f.kind,'kind'),wrap('Livello',f.level,'level'),wrap('Corso',f.course,'course'),wrap('Docente',f.teacher,'teacher'),wrap('Stato corso',f.state,'state'),wrap('Passaggio di livello',f.continued,'continued'),
+    h('div',{class:'row','data-f':'period'},h('label',{class:'small'},'Dal',f.from),h('label',{class:'small'},'Al',f.to)),dl];
+  const out=h('div');const err=h('p',{class:'err',role:'alert'});
+  const syncF=()=>{const r=REPORTS[type.value];desc.textContent=r.d;fields.forEach(x=>{if(x.dataset&&x.dataset.f)x.hidden=!r.f.includes(x.dataset.f)})};
+  type.addEventListener('change',()=>{R.type=type.value;syncF();out.replaceChildren()});syncF();
+  const collect=()=>{
+    const v={kind:f.kind.value,level:f.level.value,course:f.course.value,teacher:f.teacher.value,state:f.state.value,continued:f.continued.value,from:f.from.value,to:f.to.value};
+    const nm=f.student.value.trim();let sid='';
+    if(nm){const m=A.ov.students.filter(s=>norm(s.name)===norm(nm));if(m.length!==1)return {error:m.length?'Ci sono più alunni con questo nome: scrivi il nome completo.':'Alunno non trovato: scegli un nome dall’elenco.'};sid=m[0].id;v.studentName=m[0].name}
+    v.student=sid;return {v};
+  };
+  const run=async(vIn)=>{
+    err.textContent='';
+    const c=vIn?{v:vIn}:collect();if(c.error){err.textContent=c.error;return}
+    const v=c.v;if(v.from&&v.to&&v.to<v.from){err.textContent='La data «al» è prima di «dal».';return}
+    const t=type.value;R.v=v;
+    const used=REPORTS[t].f;const par={};Object.entries(v).forEach(([k,x])=>{if(x&&(k==='period'||used.includes(k)||k==='from'||k==='to'&&used.includes('period')))par[k]=x});
+    if(!used.includes('period')){delete par.from;delete par.to}
+    out.replaceChildren(h('p',{class:'sub'},'Calcolo…'));
+    const r=await sb.rpc('admin_report',{p_type:t,p_params:par});
+    if(r.error||!r.data){out.replaceChildren(h('p',{class:'err'},'Report non riuscito: '+((r.error&&r.error.message)||'errore')));return}
+    // storico dei report usati
+    try{const key=JSON.stringify([t,par]);let hs=LS.get('esmet_rep_hist',[]);const e=hs.find(x=>x.key===key);if(e){e.n++;e.at=Date.now()}else hs.push({key,type:t,v,n:1,at:Date.now()});hs.sort((a,b)=>b.n-a.n||b.at-a.at);LS.set('esmet_rep_hist',hs.slice(0,12))}catch(e){}
+    const {cols,rows}=r.data;
+    const tbl=h('table',{class:'rep-tbl'},h('thead',null,h('tr',null,cols.map(x=>h('th',null,x)))),h('tbody',null,rows.map(row=>h('tr',null,row.map(x=>h('td',null,x==null?'':String(x)))))));
+    out.replaceChildren(
+      h('div',{class:'row',style:'justify-content:space-between;align-items:center'},h('p',{class:'sub small'},rows.length+(rows.length===1?' riga':' righe')),
+        rows.length?h('button',{class:'primary small',onclick:()=>csvDownload('report-'+t+'-'+isoD(new Date())+'.csv',cols,rows)},'⬇ Esporta CSV'):null),
+      rows.length?h('div',{class:'rep-wrap'},tbl):h('p',{class:'sub'},'Nessun risultato con questi filtri.'));
+  };
+  const go=h('button',{class:'primary',onclick:()=>run()},'Cerca');
+  const recent=hist.length?h('div',{class:'card'},h('p',{class:'sub small'},'Report usati più spesso'),h('div',null,hist.slice(0,5).map(x=>h('button',{class:'ctag',style:'border:0;cursor:pointer',onclick:()=>adminReports({type:x.type,v:x.v}).then(()=>{})},REPORTS[x.type]?REPORTS[x.type].t+(x.v.studentName?' · '+x.v.studentName:'')+(x.n>1?' ('+x.n+')':''):x.type)))):null;
+  mount(aHeader(),h('h2',{class:'sect'},'Report'),recent,
+    h('div',{class:'card'},h('label',{class:'small'},'Che report vuoi?',type),desc,...fields,go,err),out,aTabs('anag'),footer());
+  if(pre)run(pre.v);
+}
 
 /* amministratore: avvisi alla scuola (alunni, docenti o tutti) */
 const AUD={students:'Tutti gli alunni',teachers:'Tutti i docenti',all:'Alunni e docenti'};
