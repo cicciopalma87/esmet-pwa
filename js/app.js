@@ -317,15 +317,30 @@ async function notifFetch(staff){
 function bellBtn(staff,backFn){
   const dot=h('span',{class:'bdot',hidden:'hidden'});
   const b=h('button',{class:'icon-btn bellbtn',style:'background:var(--sand);position:relative','aria-label':'Notifiche',onclick:()=>notifView(staff,backFn)},ico('bell'),dot);
-  notifFetch(staff).then(l=>{const n=l.filter(x=>!x.read).length;if(n){dot.hidden=false;dot.textContent=n>9?'9+':String(n);b.setAttribute('aria-label','Notifiche, '+n+' da leggere')}});
+  notifFetch(staff).then(l=>{const n=l.filter(x=>!x.read&&!x.hidden).length;if(n){dot.hidden=false;dot.textContent=n>9?'9+':String(n);b.setAttribute('aria-label','Notifiche, '+n+' da leggere')}});
   return b;
 }
-async function notifView(staff,backFn){
-  mount(topbar('Notifiche',backFn),h('p',{class:'sub'},'Caricamento…'));
+const NCAT=[['announcement','Avvisi',['announcement']],['whiteboard','Lavagne',['whiteboard','whiteboard_replaced']],['exercises','Esercizi',['exercises']],['session','Calendario',['session']],['response','Risposte',['response']]];
+async function notifView(staff,backFn,cat){
+  mount(topbar(cat?'Storico · '+cat[1]:'Notifiche',cat?()=>notifView(staff,backFn):backFn),h('p',{class:'sub'},'Caricamento…'));
   const l=await notifFetch(staff);
-  const rows=l.length?l.map(x=>h('div',{class:'card notif'+(x.read?'':' unread')},h('strong',null,x.title),x.body?h('p',{class:'sub small'},x.body):null,h('span',{class:'sub small'},fmtDate(x.at)))):[h('p',{class:'sub'},'Nessuna notifica.')];
-  mount(topbar('Notifiche',backFn),h('p',{class:'sub small'},'Le notifiche vengono conservate per 90 giorni.'),...rows,footer());
-  if(l.some(x=>!x.read)){try{await (staff?sb.rpc('my_notifications_read'):sb.rpc('student_notifications_read',{p_code:S.code}))}catch(e){}}
+  const hide=async id=>{try{await (staff?sb.rpc('my_notifications_hide',{p_id:id}):sb.rpc('student_notifications_hide',{p_code:S.code,p_id:id}))}catch(e){}notifView(staff,backFn)};
+  if(cat){
+    const L=l.filter(x=>cat[2].includes(x.kind));
+    return mount(topbar('Storico · '+cat[1],()=>notifView(staff,backFn)),
+      h('p',{class:'sub small'},'Tutte le notifiche di questa categoria degli ultimi 90 giorni, anche quelle nascoste.'),
+      L.length?L.map(x=>h('div',{class:'card notif'},h('strong',null,x.title),x.body?h('p',{class:'sub small'},x.body):null,h('span',{class:'sub small'},fmtDate(x.at)+(x.hidden?' · nascosta':'')))):h('p',{class:'sub'},'Nessuna notifica in questa categoria.'),footer());
+  }
+  const vis=l.filter(x=>!x.hidden);
+  const rows=vis.length?vis.map(x=>h('div',{class:'card notif'+(x.read?'':' unread')},
+    h('div',{class:'row',style:'justify-content:space-between;align-items:flex-start'},h('strong',null,x.title),h('button',{class:'xbtn','aria-label':'Nascondi questa notifica',onclick:()=>hide(x.id)},'✕')),
+    x.body?h('p',{class:'sub small'},x.body):null,h('span',{class:'sub small'},fmtDate(x.at)))):[h('p',{class:'sub'},'Nessuna notifica da vedere.')];
+  const menu=h('div',{class:'notif-menu',hidden:'hidden'},NCAT.map(c=>h('button',{class:'linkbtn',onclick:()=>notifView(staff,backFn,c)},c[1])));
+  const bar=h('div',{class:'row',style:'justify-content:space-between;align-items:center'},
+    vis.length?h('button',{class:'secondary small',onclick:()=>hide(null)},'Nascondi tutte'):h('span'),
+    h('div',{style:'position:relative'},h('button',{class:'secondary small','aria-haspopup':'true',onclick:()=>{menu.hidden=!menu.hidden}},'Storico ▾'),menu));
+  mount(topbar('Notifiche',backFn),bar,h('p',{class:'sub small'},'Con ✕ o «Nascondi tutte» le notifiche escono da questa schermata ma restano nello storico per 90 giorni.'),...rows,footer());
+  if(vis.some(x=>!x.read)){try{await (staff?sb.rpc('my_notifications_read'):sb.rpc('student_notifications_read',{p_code:S.code}))}catch(e){}}
 }
 function tabHeader(){
   const c=curCourse();
@@ -1765,26 +1780,46 @@ async function teacherAnnouncements(c){
   const back=()=>teacherHome();
   mount(topbar('Avvisi · '+c.name,back),h('p',{class:'sub'},'Caricamento…'));
   const [ls,cs]=await Promise.all([
-    sb.from('announcements').select('id,title,body,created_at,course_id').eq('course_id',c.id).order('created_at',{ascending:false}).limit(40),
+    sb.from('announcements').select('id,title,body,created_at,course_id,show_from,show_until,created_by').eq('course_id',c.id).order('created_at',{ascending:false}).limit(40),
     sb.from('courses').select('id,school_id,name').eq('active',true)]);
   if(ls.error)return mount(topbar('Avvisi',back),h('p',{class:'err'},'Errore nel caricamento.'),footer());
   const ti=h('input',{class:'txt',type:'text',maxlength:'120',placeholder:'Titolo (es. Lezione di giovedì spostata)'});
   const bo=h('textarea',{class:'txt',rows:'4',maxlength:'1200',placeholder:'Testo (facoltativo)'});
   const scope=h('select',{class:'txt sel','aria-label':'Destinatari'},[['one','Solo questo corso'],['all','Tutti i miei corsi']].map(([v,t])=>h('option',{value:v},t)));
+  const dFrom=h('input',{class:'txt',type:'date',value:isoD(new Date()),'aria-label':'Visibile dal'});
+  const dTo=h('input',{class:'txt',type:'date','aria-label':'Visibile fino al'});
   const msg=h('p',{role:'status'});
   const pub=h('button',{class:'primary',onclick:async()=>{
     if(!ti.value.trim()){msg.className='err';msg.textContent='Scrivi un titolo.';return}
+    if(dTo.value&&dFrom.value&&dTo.value<dFrom.value){msg.className='err';msg.textContent='La data «fino al» è prima di «dal».';return}
     pub.disabled=true;
     const targets=scope.value==='all'?cs.data:[c];
-    const {error}=await sb.from('announcements').insert(targets.map(t=>({school_id:t.school_id||c.school_id,course_id:t.id,title:ti.value.trim(),body:bo.value.trim()||null})));
+    const {error}=await sb.from('announcements').insert(targets.map(t=>({school_id:t.school_id||c.school_id,course_id:t.id,title:ti.value.trim(),body:bo.value.trim()||null,show_from:dFrom.value||null,show_until:dTo.value||null})));
     pub.disabled=false;
     if(error){msg.className='err';msg.textContent='Non pubblicato: '+error.message;return}
     teacherAnnouncements(c);
   }},'Pubblica');
   mount(topbar('Avvisi · '+c.name,back),
-    h('div',{class:'card'},h('h3',null,'Nuovo avviso'),ti,bo,h('label',null,'Destinatari',scope),pub,msg),
-    ls.data.map(a=>h('div',{class:'card ann'},h('div',{class:'row'},h('strong',null,a.title),h('span',{class:'sub small'},fmtDate(a.created_at))),a.body?h('p',{class:'ann-b'},a.body):null,
-      h('button',{class:'linkbtn small',onclick:async()=>{if(!await askYes('Eliminare l’avviso?','Gli alunni non lo vedranno più.','Elimina'))return;await sb.from('announcements').delete().eq('id',a.id);teacherAnnouncements(c)}},'Elimina'))),
+    h('div',{class:'card'},h('h3',null,'Nuovo avviso'),ti,bo,h('label',null,'Destinatari',scope),h('label',null,'Visibile dal',dFrom),h('label',null,'Fino al (facoltativo: senza data resta finché non lo elimini)',dTo),h('p',{class:'sub small'},'Gli alunni ricevono una sola notifica alla pubblicazione. Poi puoi correggere l’avviso o cambiarne le date senza altre notifiche.'),pub,msg),
+    ls.data.map(a=>{const today=isoD(new Date());const st=a.show_until&&a.show_until<today?'scaduto':(a.show_from&&a.show_from>today?'programmato':'visibile');
+      return h('div',{class:'card ann'},h('div',{class:'row'},h('strong',null,a.title),h('span',{class:'sub small'},fmtDate(a.created_at))),a.body?h('p',{class:'ann-b'},a.body):null,
+      h('p',{class:'sub small'},h('span',{class:'pill '+(st==='visibile'?'g':'n')},st),' '+(a.show_from?'dal '+fmtDate(a.show_from):'')+(a.show_until?' fino al '+fmtDate(a.show_until):' senza scadenza')),
+      h('button',{class:'linkbtn small',onclick:async()=>{
+        const t2=h('input',{class:'txt',type:'text',maxlength:'120',value:a.title,'aria-label':'Titolo'});
+        const b2=h('textarea',{class:'txt',rows:'4',maxlength:'1200','aria-label':'Testo'});b2.value=a.body||'';
+        const f2=h('input',{class:'txt',type:'date',value:a.show_from||'','aria-label':'Visibile dal'});
+        const u2=h('input',{class:'txt',type:'date',value:a.show_until||'','aria-label':'Visibile fino al'});
+        const er=h('p',{class:'err'});
+        const ok=await dlg('Modifica avviso',[h('p',{class:'sub small'},'Gli alunni non ricevono una nuova notifica: vedono l’avviso aggiornato.'),t2,b2,h('label',{class:'small'},'Visibile dal',f2),h('label',{class:'small'},'Fino al (vuoto = nessuna scadenza)',u2),er],close=>[
+          h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),
+          h('button',{class:'primary',onclick:async()=>{
+            if(!t2.value.trim()){er.textContent='Scrivi un titolo.';return}
+            if(u2.value&&f2.value&&u2.value<f2.value){er.textContent='La data «fino al» è prima di «dal».';return}
+            const x=await sb.from('announcements').update({title:t2.value.trim(),body:b2.value.trim()||null,show_from:f2.value||null,show_until:u2.value||null,updated_at:new Date().toISOString()}).eq('id',a.id);
+            if(x.error){er.textContent='Non salvato: '+x.error.message;return}
+            close(true)}},'Salva')]);
+        if(ok)teacherAnnouncements(c)}},'Modifica'),
+      h('button',{class:'linkbtn small',onclick:async()=>{if(!await askYes('Eliminare l’avviso?','Gli alunni non lo vedranno più.','Elimina'))return;await sb.from('announcements').delete().eq('id',a.id);teacherAnnouncements(c)}},'Elimina'))}),
     footer());
 }
 
