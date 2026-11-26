@@ -874,7 +874,7 @@ async function teacherHome(){
   const casc=csSorted.length>1?courseCascade(csSorted,homeC&&homeC.id,n=>{S.homeC=n.id;teacherHome()}):null;
   const blocks=csSorted.filter(c=>!casc||c.id===homeC.id).map(c=>{
     const studs=en.data.filter(e=>e.course_id===c.id&&e.students).sort((a,b)=>a.students.display_name.localeCompare(b.students.display_name));
-    return h('section',{class:'card'},h('h2',null,c.name),h('p',{class:'sub'},c.level+' · '+studs.length+' studenti'),
+    return h('section',{class:'card'},h('h2',null,c.name),h('p',{class:'sub'},(c.level?c.level+' · ':'')+studs.length+' studenti'),
       h('div',{class:'rows'},studs.map(e=>h('button',{class:'row-item',onclick:()=>studentSheet(e.students,c)},
         h('span',{class:'ri-l'},e.students.display_name,e.section?h('span',{class:'tag'},e.section==='morning'?'mattina':e.section==='evening'?'sera':e.section):null),
         h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
@@ -1072,15 +1072,16 @@ function courseCascade(list,curId,onPick,opts){
     const kinds=[...new Set(inL.map(x=>x.kind))].sort((a,b)=>(KORD[a]??9)-(KORD[b]??9));
     if(!kinds.includes(st.kind))st.kind=kinds[0];
     const inK=inL.filter(x=>x.kind===st.kind);
-    const levels=[...new Set(inK.map(x=>x.level))].sort((a,b)=>LEVELS.indexOf(a)-LEVELS.indexOf(b));
-    if(!levels.includes(st.level))st.level=levels[0];
-    const match=inK.filter(x=>x.level===st.level);
+    const noLv=st.kind==='individual';
+    const levels=noLv?[]:[...new Set(inK.map(x=>x.level))].sort((a,b)=>LEVELS.indexOf(a)-LEVELS.indexOf(b));
+    if(noLv)st.level=null;else if(!levels.includes(st.level))st.level=levels[0];
+    const match=noLv?inK:inK.filter(x=>x.level===st.level);
     if(!match.find(x=>x.id===st.id))st.id=match[0]&&match[0].id;
     const mk=(label,vals,val,txt,fn)=>{const e=selEl(vals.map(v=>[v,txt(v)]),val,label);e.disabled=vals.length<2;e.onchange=()=>fn(e.value);return h('label',{class:'small'},label,e)};
     const parts=[
       mk('Lingua',langs,st.lang,v=>v,v=>{st.lang=v;st.kind=null;st.level=null;st.id=null;draw();fire()}),
       mk('Tipologia',kinds,st.kind,v=>KL[v]||v,v=>{st.kind=v;st.level=null;st.id=null;draw();fire()}),
-      mk('Livello',levels,st.level,v=>v,v=>{st.level=v;st.id=null;draw();fire()})];
+      ...(noLv?[]:[mk('Livello',levels,st.level,v=>v,v=>{st.level=v;st.id=null;draw();fire()})])];
     if(match.length>1)parts.push(mk('Corso',match.map(x=>x.id),st.id,v=>{const x=match.find(y=>y.id===v);return opts.label?opts.label(x):courseLabel(x)},v=>{st.id=v;fire()}));
     wrap.replaceChildren(...parts);
   };
@@ -1125,6 +1126,8 @@ function classPicker(o){
   const dc=selEl([],'__','Docente');
   const kd=selEl(kinds.map(k=>[k,KL[k]]),'group','Tipo di corso');
   const lv=selEl(LEVELS.map(x=>[x,x]),'A1','Livello');
+  const lvW=h('div',null,lab('Livello'),lv);
+  const LV=()=>kd.value==='individual'?null:lv.value;
   const info=h('p',{class:'sub small',role:'status'});
   const fillT=()=>{
     const all=A.staff.staff.filter(p=>p.role==='teacher'&&!p.blocked);
@@ -1136,7 +1139,7 @@ function classPicker(o){
   const sd=h('input',{class:'txt',type:'date',value:isoD(new Date()),'aria-label':'Data di inizio corso'});const sdW=h('div',{hidden:'hidden'},lab('Data di inizio corso'),sd);
   const matchesOf=sel=>sel.kind==='individual'?[]:A.ov.courses.filter(c=>c.active!==false&&c.language===sel.language&&(c.teacher_id||null)===sel.teacher&&c.kind===sel.kind&&c.level===sel.level);
   const get=()=>{
-    const sel={language:lg.value,teacher:dc.value==='__'?undefined:(dc.value||null),kind:kd.value,level:lv.value};
+    const sel={language:lg.value,teacher:dc.value==='__'?undefined:(dc.value||null),kind:kd.value,level:LV()};
     if(sel.kind!=='individual'&&sel.teacher!==undefined){
       const m=matchesOf(sel);
       if(o.noIndividual||!m.length||cl.value==='__new'||!cl.value){sel.start=sd.value||isoD(new Date());sel.courseId=null;if(!o.noIndividual&&m.some(c=>c.start_date===sel.start))sel.dup=true}
@@ -1146,8 +1149,8 @@ function classPicker(o){
   };
   const upd=()=>{
     fillT();
-    const sel0={language:lg.value,teacher:dc.value==='__'?undefined:(dc.value||null),kind:kd.value,level:lv.value};
-    lv.disabled=false;
+    const sel0={language:lg.value,teacher:dc.value==='__'?undefined:(dc.value||null),kind:kd.value,level:LV()};
+    lv.disabled=false;lvW.hidden=kd.value==='individual';
     clW.hidden=true;sdW.hidden=true;
     if(sel0.teacher===undefined){info.textContent='';return}
     const nm=o.getName?o.getName():'';
@@ -1175,7 +1178,7 @@ function classPicker(o){
   [lg,dc,kd,lv,cl,sd].forEach(e=>e.addEventListener('change',upd));
   lg.addEventListener('change',()=>{dc.value='__'});
   upd();
-  return {node:h('div',{class:'picker'},lab('Lingua'),lg,lab('Docente'),dc,lab('Tipo di corso'),kd,lab('Livello'),lv,clW,sdW,info),get,refresh:upd};
+  return {node:h('div',{class:'picker'},lab('Lingua'),lg,lab('Docente'),dc,lab('Tipo di corso'),kd,lvW,clW,sdW,info),get,refresh:upd};
 }
 function courseTitle(sel,nm){
   return sel.kind==='individual'?sel.language+' - corso individuale '+(nm||'…'):sel.kind==='group'?sel.language+' '+sel.level+' - gruppo':sel.language+' '+sel.level+' - conversazione';
@@ -1189,7 +1192,7 @@ function findCourse(sel,nm){
 }
 async function resolveCourse(sel,nm){
   const ex=findCourse(sel,nm);if(ex)return ex.id;
-  const {data,error}=await sb.rpc('admin_create_course',{p_name:courseTitle(sel,nm),p_level:sel.level,p_kind:sel.kind,p_teacher:sel.teacher||null,p_language:sel.language,p_start:sel.start||null});
+  const {data,error}=await sb.rpc('admin_create_course',{p_name:courseTitle(sel,nm),p_level:sel.kind==='individual'?null:sel.level,p_kind:sel.kind,p_teacher:sel.teacher||null,p_language:sel.language,p_start:sel.start||null});
   if(error)throw error;
   A.ov.courses.push({id:data,name:courseTitle(sel,nm),level:sel.level,kind:sel.kind,teacher_id:sel.teacher,language:sel.language,start_date:sel.start||isoD(new Date()),teacher:(A.staff.staff.find(p=>p.id===sel.teacher)||{}).name||null});
   return data;
@@ -1291,7 +1294,7 @@ function adminClassi(){
       if(!c)return h('p',{class:'sub'},'Nessuna classe con questi filtri.');
       const stu=A.ov.students.filter(s=>s.course_ids.includes(c.id));
       return h('div',{class:'card'},h('h3',null,shortName(c),c.active===false?h('span',{class:'tag'},'non attiva'):null),
-        h('p',{class:'sub small'},KL[c.kind]+' · '+c.level+' · '+c.language+(c.teacher?'':' · docente non assegnato')),
+        h('p',{class:'sub small'},KL[c.kind]+' · '+(c.level?c.level+' · ':'')+c.language+(c.teacher?'':' · docente non assegnato')),
         h('p',{class:'sub small'},stu.length?stu.length+' alunni: '+stu.map(s=>s.name).join(', '):'Nessun alunno'),
         h('div',{class:'row'},h('button',{class:'secondary',onclick:()=>courseDetail(c.id)},'Modifica'),h('button',{class:'secondary',onclick:()=>changeTeacher(c)},'Cambia docente')));
     }));
@@ -1348,6 +1351,7 @@ async function inviteDlg(p){
   const before=new Set(keep);
   const kd=selEl(['group','conversation','individual'].map(k=>[k,KL[k]]),'group','Tipo di corso');
   const lv=selEl(LEVELS.map(x=>[x,x]),'A1','Livello');
+  const lvW=h('div',null,lab('Livello'),lv);
   const mineBox=h('div');const listBox=h('div',{class:'opts'});const warn=h('p',{class:'err',role:'alert'});const err=h('p',{class:'err',role:'alert'});
   const btnWrap=h('div',{class:'row',style:'flex-wrap:wrap;gap:8px;justify-content:flex-end'});
   let chosen=null,closeFn=null;
@@ -1356,6 +1360,7 @@ async function inviteDlg(p){
     mineBox.replaceChildren(...(edit?[lab('Classi attuali'),...(keep.size?byCOrd([...keep]).map(id=>h('span',{class:'ctag'},courseName(id,true),' ',h('button',{class:'xbtn','aria-label':'Togli classe',onclick:()=>{keep.delete(id);drawMine()}},'✕'))):[h('p',{class:'sub small'},'Nessuna classe assegnata')])]:[]));
   };
   const drawList=()=>{
+    lvW.hidden=kd.value==='individual';
     const L=A.ov.courses.filter(c=>langs().includes(c.language)&&c.kind===kd.value&&(c.kind==='individual'||c.level===lv.value)&&!keep.has(c.id));
     if(chosen&&!L.some(c=>c.id===chosen.id))chosen=null;
     listBox.replaceChildren(...(L.length?L.map(c=>h('button',{class:'opt'+(chosen&&chosen.id===c.id?' on':''),onclick:()=>{chosen=(chosen&&chosen.id===c.id)?null:c;drawList()}},shortName(c))):[h('p',{class:'sub small'},'Nessuna classe di questo tipo e livello.')]));
@@ -1385,14 +1390,14 @@ async function inviteDlg(p){
   lgs.forEach(([l,c])=>c.addEventListener('change',drawList));
   drawMine();drawList();
   const v=await dlg(edit?'Modifica docente':'Invita docente',[em,nm,lab('Lingue insegnate'),...lgs.map(([l,c])=>h('label',{class:'chk-row'},c,l)),
-    mineBox,h('hr'),lab('Assegna una classe (facoltativo)'),kd,lv,lab('Classi già presenti'),listBox,warn,err],close=>{closeFn=close;return [btnWrap]});
+    mineBox,h('hr'),lab('Assegna una classe (facoltativo)'),kd,lvW,lab('Classi già presenti'),listBox,warn,err],close=>{closeFn=close;return [btnWrap]});
   if(!v)return;
   try{
     const ids=new Set(keep);
     if(v.mode==='assign')ids.add(chosen.id);
     if(v.mode==='new'){
       const lg0=langs()[0];
-      ids.add(await resolveCourse({language:lg0,teacher:null,kind:kd.value,level:lv.value},''));
+      ids.add(await resolveCourse({language:lg0,teacher:null,kind:kd.value,level:kd.value==='individual'?null:lv.value},''));
     }
     const {error}=await sb.rpc('admin_invite_staff',{p_email:em.value,p_full_name:nm.value,p_role:'teacher',p_languages:langs(),p_course_ids:[...ids]});
     if(error)throw error;
@@ -1509,7 +1514,7 @@ async function courseDetail(id){
   if(!c||r.error)return say('Errore',r.error?r.error.message:'Classe non trovata').then(()=>adminHome('classi'));
   const st=r.data;
   const nm=h('input',{class:'txt',type:'text',value:c.name});
-  const lv=selEl(LEVELS.map(x=>[x,x]),c.level,'Livello');
+  const lv=selEl(LEVELS.map(x=>[x,x]),c.level||'A1','Livello');
   const lg=selEl(LANGS.map(x=>[x,x]),c.language||'Tedesco','Lingua');
   const dc=selEl(teacherOpts(),c.teacher_id||'','Docente');
   const ac=selEl([['1','Attiva'],['0','Archiviata']],c.active===false?'0':'1','Stato');if(c.active===false)ac.disabled=true;
@@ -1517,14 +1522,14 @@ async function courseDetail(id){
   const sd=h('input',{class:'txt',type:'date',value:(sdr.data&&sdr.data.start_date)||'','aria-label':'Data di inizio corso'});
   const stu=A.ov.students.filter(s=>s.course_ids.includes(id));
   formPage(shortName(c),'classi',()=>adminHome('classi'),[
-    fld('Nome',nm),fld('Tipo',h('input',{class:'txt',type:'text',value:KL[c.kind],readonly:true})),fld('Livello',lv),fld('Lingua',lg),fld('Data di inizio corso',sd),fld('Docente',dc),fld('Stato',ac),
+    fld('Nome',nm),fld('Tipo',h('input',{class:'txt',type:'text',value:KL[c.kind],readonly:true})),...(c.kind==='individual'?[]:[fld('Livello',lv)]),fld('Lingua',lg),fld('Data di inizio corso',sd),fld('Docente',dc),fld('Stato',ac),
     h('h3',null,'Contenuti'),h('p',{class:'sub small'},st.students+' alunni · '+st.lessons+' lezioni caricate · '+st.sessions+' lezioni in calendario · '+st.whiteboards+' lavagne · '+st.announcements+' avvisi'),
     h('h3',null,'Alunni'),h('div',null,...(stu.length?stu.map(s=>h('span',{class:'ctag'},s.name)):[h('p',{class:'sub small'},'Nessun alunno.')])),
     h('h3',null,'Storico classe'),await courseHistoryBlock(id)],
-    async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:ac.value==='1',p_start:sd.value||null});if(x.error)throw x.error;adminHome('classi')},
+    async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:c.kind==='individual'?null:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:ac.value==='1',p_start:sd.value||null});if(x.error)throw x.error;adminHome('classi')},
     async()=>{
       const hasData=(st.attendance||0)>0||(st.results||0)>0||st.lessons>0||st.whiteboards>0||st.announcements>0;
-      const arch=async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:false,p_start:sd.value||null});if(x.error)return say('Errore',x.error.message);adminHome('classi')};
+      const arch=async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:c.kind==='individual'?null:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:false,p_start:sd.value||null});if(x.error)return say('Errore',x.error.message);adminHome('classi')};
       const del=async(force)=>{const x=await sb.rpc('admin_delete_course',{p_id:id,p_force:!!force});if(x.error)return say('Errore',x.error.message);adminHome('classi')};
       if(!hasData){
         if(!await confirmDelete('la classe '+shortName(c,true),'La classe ha solo alunni e lezioni in calendario ('+st.sessions+'); gli '+st.students+' alunni restano ma escono dalla classe.'))return;
@@ -2232,7 +2237,7 @@ async function teacherLessons(c,all){
     const f=fileIn.files&&fileIn.files[0];if(!f)return;
     let txt;try{txt=await f.text()}catch(e){return say('File non leggibile','Non riesco a leggere il file. Riprova.')}
     lessonImportPreview(c,all,ls,txt,f.name)}});
-  const others=all.filter(x=>x.id!==c.id&&x.level===c.level&&x.kind===c.kind);
+  const others=c.kind==='individual'?[]:all.filter(x=>x.id!==c.id&&x.level===c.level&&x.kind===c.kind);
   const copyBtn=others.length?h('button',{class:'secondary',onclick:async()=>{
     const sel=selEl(others.map(x=>[x.id,x.name]),others[0].id,'Classe da cui copiare');
     const list=h('div',{class:'rows'});let boxes=[];
