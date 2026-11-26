@@ -1869,7 +1869,7 @@ const REPORTS={
   presenze:{t:'Presenze',d:'Presenze, assenze e percentuale per alunno e corso (solo lezioni tenute con presenza segnata).',f:['period','kind','level','course','teacher','student','state']},
   alunni_corsi:{t:'Corsi frequentati dagli alunni',d:'Per ogni alunno i corsi frequentati, con docente, date e stato.',f:['period','kind','level','course','teacher','student','state']},
   corsi:{t:'Corsi per livello',d:'Corsi attivi e conclusi con quanti e quali alunni (attuali e totali nello storico).',f:['period','kind','level','course','teacher','student','state']},
-  docenti:{t:'Docenti e classi',d:'Classi assegnate a ogni docente (anche passate), lezioni tenute, blocchi da 10 per le individuali e corso completo da 20.',f:['period','kind','level','course','teacher','student','state']},
+  docenti:{t:'Docenti e classi',d:'Classi assegnate a ogni docente (anche passate), lezioni tenute, blocchi da 10 per le individuali (senza livello) e corso completo solo per A1 gruppo (20 lezioni).',f:['period','kind','level','course','teacher','student','state']},
   percorsi:{t:'Percorsi di livello',d:'Alunni che sono passati ai livelli successivi (A1, A2, B1…) con il docente di ogni livello. Cercando un docente: i suoi alunni e dove hanno continuato.',f:['kind','teacher','student','continued']}
 };
 function csvDownload(name,cols,rows){
