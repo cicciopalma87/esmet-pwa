@@ -194,3 +194,4 @@ label.chk{flex-direction:row;color:var(--ink)}
 .notif.unread{border-left:4px solid #c0392b}
 .notif .sub{display:block}
 .wb-act{display:flex;gap:6px;flex-wrap:wrap}
+.tf-row{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line,#ddd);padding-top:6px;margin-top:6px}.tf-row label{display:flex;flex-direction:column;gap:2px}

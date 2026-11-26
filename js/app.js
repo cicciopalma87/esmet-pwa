@@ -2018,6 +2018,7 @@ async function teacherLessons(c,all){
       if(x.error)return say('Non riuscito',errIt(x.error));
       if(!l.published)await say('Pubblicata','La lezione è pronta. Per farla vedere agli alunni usa «Sblocca lezioni».');
       redo()}},l.published?'Rimetti in bozza':'Pubblica'));
+    if(!l.published&&!l.has_results)act.push(h('button',{class:'secondary',onclick:()=>lessonTextFix(c,all,l)},'Correggi testi'));
     act.push(h('button',{class:'secondary',onclick:async()=>{
       const v=await askText('Titolo della lezione '+l.number,'Cambia il titolo come preferisci.',l.title,'Salva');
       if(v==null)return;const t=v.trim();if(!t||t===l.title)return;
@@ -2042,6 +2043,55 @@ async function teacherLessons(c,all){
     footer());
 }
 /* ---- anteprima dell’importazione ---- */
+/* correzione rapida dei testi di una lezione in bozza (refusi); le modifiche strutturali verranno con l'editor a blocchi */
+function lessonTextFix(c,all,l){
+  const back=()=>teacherLessons(c,all);
+  const content=JSON.parse(JSON.stringify(l.content||{exercises:[]}));
+  const LAB={title:'Titolo',instr:'Istruzioni',lab:'Etichetta',t:'Testo',l:'Sinistra',r:'Destra',q:'Domanda',a:'Risposta corretta',w:'Risposta sbagliata',pre:'Prima',ans:'Parola',post:'Dopo',s:'Frase',f:'Fronte',b:'Retro',cols:'Colonna',groups:'Gruppo'};
+  const KEEP=new Set(['pre','post']);
+  const fields=[];
+  const mk=(obj,key,idx,label,long)=>{
+    const val=idx==null?obj[key]:obj[key][idx];
+    const inp=h(long?'textarea':'input',long?{class:'txt',rows:'2','aria-label':label}:{class:'txt',type:'text','aria-label':label});
+    inp.value=val;fields.push({obj,key,idx,inp,orig:val,label});
+    return h('label',{class:'small'},label,inp);
+  };
+  const SK=new Set(['id','type','hw','extra','ord','g']);
+  const blocks=(content.exercises||[]).map((ex,i)=>{
+    const kids=[h('strong',null,'Esercizio '+(i+1)),mk(ex,'title',null,'Titolo esercizio')];
+    if(typeof ex.instr==='string')kids.push(mk(ex,'instr',null,'Istruzioni',true));
+    if(typeof ex.lab==='string'&&ex.lab)kids.push(mk(ex,'lab',null,'Etichetta'));
+    ['cols','groups'].forEach(k=>Array.isArray(ex[k])&&ex[k].forEach((v,j)=>typeof v==='string'&&kids.push(mk(ex,k,j,LAB[k]+' '+(j+1)))));
+    (ex.items||[]).forEach((it,j)=>{
+      const row=[h('span',{class:'sub small'},'Riga '+(j+1))];
+      Object.keys(it).forEach(k=>{
+        if(SK.has(k))return;const v=it[k];
+        if(typeof v==='string')row.push(mk(it,k,null,LAB[k]||k,v.length>60));
+        else if(Array.isArray(v))v.forEach((x,m)=>typeof x==='string'&&row.push(mk(it,k,m,(LAB[k]||k)+(v.length>1?' '+(m+1):''),x.length>60)));
+      });
+      kids.push(h('div',{class:'tf-row'},row));
+    });
+    return h('div',{class:'card'},kids);
+  });
+  const err=h('p',{class:'err',role:'alert'});
+  const save=async()=>{
+    err.textContent='';let n=0;
+    for(const f of fields){
+      const v=KEEP.has(f.key)?f.inp.value:f.inp.value.trim();
+      if(v===f.orig)continue;
+      if(!v.trim()&&f.orig.trim()){err.textContent='«'+f.label+'» non può restare vuoto.';f.inp.focus();return}
+      if(f.idx==null)f.obj[f.key]=v;else f.obj[f.key][f.idx]=v;n++;
+    }
+    if(!n)return back();
+    const x=await sb.from('lessons').update({content}).eq('id',l.id);
+    if(x.error){err.textContent='Non salvato: '+errIt(x.error);return}
+    await say('Salvato',n+(n===1?' testo corretto.':' testi corretti.')+' La versione precedente resta ripristinabile.');back();
+  };
+  mount(topbar('Correggi testi · lezione '+l.number,back),
+    h('p',{class:'sub small'},'Correggi refusi nel titolo e nei testi degli esercizi. Qui non si aggiungono né si tolgono righe: per quello ci sarà l’editor a blocchi. Usa «Anteprima» per controllare il risultato.'),
+    blocks,err,h('div',{class:'row'},h('button',{class:'primary',onclick:save},'Salva correzioni'),h('button',{class:'secondary',onclick:back},'Annulla')),footer());
+}
+
 function lessonImportPreview(c,all,existing,text,fname,withPatch){
   const back=()=>teacherLessons(c,all);
   let parsed;
@@ -2089,6 +2139,8 @@ function lessonImportPreview(c,all,existing,text,fname,withPatch){
       !r.m.problems.length?h('pre',{class:'small',style:'white-space:pre-wrap;margin:0;font-family:inherit'},exSummary(r.m.content)):null);
   });
   const nothing=!rows.some(ok);
+  const setAll=v=>boxes.forEach(b=>{if(!b.cb.disabled)b.cb.checked=v});
+  const selBar=()=>h('div',{class:'row'},h('button',{class:'secondary small',onclick:()=>setAll(true)},'Seleziona tutte'),h('button',{class:'secondary small',onclick:()=>setAll(false)},'Deseleziona tutte'));
   const go=h('button',{class:'primary',disabled:nothing,onclick:async()=>{
     const sel=boxes.filter(b=>b.cb.checked);
     if(!sel.length)return say('Niente da importare','Seleziona almeno una lezione.');
@@ -2102,14 +2154,16 @@ function lessonImportPreview(c,all,existing,text,fname,withPatch){
     back();
   }},'Importa come bozza');
   mount(topbar('Carica lezioni',back),
-    h('p',{class:'sub'},'File: '+fname+' · '+rows.length+' lezioni trovate. Scegli quali importare: le lezioni nuove o cambiate sono già selezionate.'),
+    h('p',{class:'sub'},'File: '+fname+' · '+rows.length+' lezioni trovate. Scegli quali importare: le lezioni nuove o cambiate sono già selezionate; non si possono selezionare quelle identiche a quelle già presenti o con errori (il motivo è scritto sotto ogni lezione).'),
     parsed.warnings.length?h('div',{class:'card'},parsed.warnings.map(w=>h('p',{class:'small'},'⚠ '+w))):null,
     patchInfo.length?h('div',{class:'card'},
       h('p',null,'Trovate delle aggiunte scritte a parte in fondo al file (una correzione successiva, non nell’elenco delle lezioni):'),
       patchInfo.map(q=>h('p',{class:'small'},'• Lezione '+q.n+', esercizio «'+q.h+'»: '+q.k+(q.k===1?' voce in più':' voci in più'))),
       h('label',{class:'chk-row'},(()=>{const cb=h('input',{type:'checkbox'});cb.checked=!!withPatch;cb.addEventListener('change',()=>lessonImportPreview(c,all,existing,text,fname,cb.checked));return cb})(),h('strong',null,' Vuoi aggiungerle come voci?'))):null,
     h('p',{class:'sub small'},'Le istruzioni pensate per creare gli esercizi su Wordwall non vengono mostrate agli alunni.'),
+    selBar(),
     cards,
+    selBar(),
     h('div',{class:'row'},go,h('button',{class:'secondary',onclick:back},'Annulla')),footer());
 }
 
