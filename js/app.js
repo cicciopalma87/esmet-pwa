@@ -1955,14 +1955,28 @@ async function teacherLessons(c,all){
   const others=all.filter(x=>x.id!==c.id&&x.level===c.level);
   const copyBtn=others.length?h('button',{class:'secondary',onclick:async()=>{
     const sel=selEl(others.map(x=>[x.id,x.name]),others[0].id,'Classe da cui copiare');
-    const v=await dlg('Copia il programma da un’altra classe',[
-      h('p',{class:'sub small'},'Copio in «'+c.name+'» le lezioni che qui non esistono ancora, come bozze. Le lezioni già presenti non vengono toccate. Dopo la copia le due classi vanno avanti ciascuna per conto suo: una modifica a una non cambia l’altra.'),sel],
-      close=>[h('button',{class:'secondary',onclick:()=>close(null)},'Annulla'),h('button',{class:'primary',onclick:()=>close(sel.value)},'Copia')]);
-    if(!v)return;
-    const x=await sb.rpc('teacher_copy_program',{p_from:v,p_to:c.id});
-    if(x.error)return say('Non copiato',errIt(x.error));
-    await say('Fatto',x.data?('Copiate '+x.data+' lezioni come bozza. Controllale e pubblicale quando sono pronte.'):'Non c’era nessuna lezione nuova da copiare.');redo();
-  }},'Copia programma da un’altra classe'):null;
+    const list=h('div',{class:'rows'});let boxes=[];
+    const load=async()=>{
+      list.replaceChildren(h('p',{class:'sub small',style:'padding:8px'},'Caricamento…'));
+      const r=await sb.rpc('teacher_lessons_overview',{p_course:sel.value});
+      const src=(r.data||[]);
+      boxes=src.map(l=>{const cb=h('input',{type:'checkbox'});const mine=ls.find(x=>x.number===l.number);
+        return {l,cb,el:h('label',{class:'row-item chk-row'},h('span',{class:'ri-l'},cb,' Lezione '+l.number+' · '+l.title),
+          h('span',{class:'sub small'},l.n_ex+' esercizi'+(mine?(mine.has_results?' · già svolta qui: salta':' · esiste già: verrà sostituita'):'')))}});
+      list.replaceChildren(...(boxes.length?boxes.map(b=>b.el):[h('p',{class:'sub small',style:'padding:8px'},'Questa classe non ha lezioni.')]));
+    };
+    sel.addEventListener('change',load);
+    const all=h('button',{class:'linkbtn small',onclick:()=>{const v=boxes.some(b=>!b.cb.checked);boxes.forEach(b=>b.cb.checked=v)}},'Seleziona / deseleziona tutte');
+    const pr=dlg('Copia lezioni da un’altra classe',[
+      h('p',{class:'sub small'},'Scegli le lezioni da copiare in «'+c.name+'»: arrivano come bozze, che potrai provare e modificare. Una lezione che esiste già qui viene sostituita (la versione attuale resta ripristinabile), salvo quelle con esercizi già svolti. Le due classi poi vanno avanti ciascuna per conto suo.'),sel,all,list],
+      close=>[h('button',{class:'secondary',onclick:()=>close(null)},'Annulla'),h('button',{class:'primary',onclick:()=>close({from:sel.value,nums:boxes.filter(b=>b.cb.checked).map(b=>b.l.number)})},'Copia le selezionate')]);
+    load();const v=await pr;
+    if(!v)return;if(!v.nums.length)return say('Niente da copiare','Non hai selezionato nessuna lezione.');
+    const x=await sb.rpc('teacher_copy_lessons',{p_from:v.from,p_to:c.id,p_numbers:v.nums});
+    if(x.error)return say('Non copiate',errIt(x.error));
+    const d=x.data||{};
+    await say('Fatto','Nuove bozze: '+(d.created||0)+' · sostituite: '+(d.replaced||0)+((d.skipped&&d.skipped.length)?' · saltate perché già svolte: '+d.skipped.join(', '):'')+'.');redo();
+  }},'Copia lezioni da un’altra classe'):null;
   const card=l=>{
     const act=[];
     act.push(h('button',{class:'secondary',onclick:()=>{S.prev={back:()=>{S.prev=null;redo()}};lessonView(c,{id:l.id,number:l.number,title:l.title,content:l.content})}},'Anteprima'));
@@ -1990,6 +2004,7 @@ async function teacherLessons(c,all){
     pick,
     h('p',{class:'sub'},c.name),
     h('div',{class:'row'},h('button',{class:'primary',onclick:()=>fileIn.click()},'Carica lezioni da file'),copyBtn),fileIn,
+    others.length?h('p',{class:'sub small'},'«Copia lezioni» propone solo classi dello stesso livello ('+c.level+').'):null,
     h('p',{class:'sub small'},'Le lezioni caricate restano in bozza finché non le pubblichi: provale con «Anteprima», cambia i titoli e poi pubblica. Quando gli alunni hanno già svolto degli esercizi, quelli non si possono più cambiare: puoi solo rinominare la lezione o aggiungere esercizi in fondo.'),
     ls.length?ls.map(card):h('p',{class:'sub'},'Nessuna lezione in questa classe.'),
     footer());
