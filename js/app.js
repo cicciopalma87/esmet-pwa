@@ -865,7 +865,7 @@ async function teacherHome(){
   S.prev=null;
   mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),h('p',{class:'sub'},'Caricamento…'),tTabs('corsi'));
   const [cs,en]=await Promise.all([
-    sb.from('courses').select('id,school_id,name,level,kind,language,zoom_url,chat_url').eq('active',true).order('name'),
+    sb.from('courses').select('id,school_id,name,level,kind,language,start_date,zoom_url,chat_url').eq('active',true).order('name'),
     sb.from('enrollments').select('course_id,section,students(id,display_name,code,consent_at)')
   ]);
   if(cs.error||en.error)return mount(tHeader(),h('p',{class:'err'},'Errore nel caricamento. Il tuo account ha un profilo docente?'),tTabs('corsi'),footer());
@@ -1051,6 +1051,12 @@ const KORD={group:0,conversation:1,individual:2};
 function sortCourses(list){
   return (list||[]).slice().sort((a,b)=>(KORD[a.kind]??9)-(KORD[b.kind]??9)||(LEVELS.indexOf(a.level)-LEVELS.indexOf(b.level))||String(a.name).localeCompare(String(b.name)));
 }
+/* etichetta breve nel menù «Corso»: individuali = solo il nome dell'alunno; gruppi e conversazioni = nome + data di inizio */
+function courseLabel(c){
+  if(c.kind==='individual'){const m=/individuale\s+(.+)$/i.exec(c.name);return m?m[1]:c.name}
+  const d=c.start_date?new Date(c.start_date+'T12:00:00'):null;
+  return c.name+(d?' - del '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getFullYear()).slice(2):'');
+}
 /* tre menù a cascata: Lingua → Tipologia → Livello (e, solo se restano più corsi, il corso) */
 function courseCascade(list,curId,onPick,opts){
   opts=opts||{};
@@ -1074,7 +1080,7 @@ function courseCascade(list,curId,onPick,opts){
       mk('Lingua',langs,st.lang,v=>v,v=>{st.lang=v;st.kind=null;st.level=null;st.id=null;draw();fire()}),
       mk('Tipologia',kinds,st.kind,v=>KL[v]||v,v=>{st.kind=v;st.level=null;st.id=null;draw();fire()}),
       mk('Livello',levels,st.level,v=>v,v=>{st.level=v;st.id=null;draw();fire()})];
-    if(match.length>1)parts.push(mk('Corso',match.map(x=>x.id),st.id,v=>{const x=match.find(y=>y.id===v);return opts.label?opts.label(x):x.name},v=>{st.id=v;fire()}));
+    if(match.length>1)parts.push(mk('Corso',match.map(x=>x.id),st.id,v=>{const x=match.find(y=>y.id===v);return opts.label?opts.label(x):courseLabel(x)},v=>{st.id=v;fire()}));
     wrap.replaceChildren(...parts);
   };
   let first=true;
@@ -1468,16 +1474,18 @@ async function courseDetail(id){
   const lg=selEl(LANGS.map(x=>[x,x]),c.language||'Tedesco','Lingua');
   const dc=selEl(teacherOpts(),c.teacher_id||'','Docente');
   const ac=selEl([['1','Attiva'],['0','Archiviata']],c.active===false?'0':'1','Stato');if(c.active===false)ac.disabled=true;
+  const sdr=await sb.from('courses').select('start_date').eq('id',id).maybeSingle();
+  const sd=h('input',{class:'txt',type:'date',value:(sdr.data&&sdr.data.start_date)||'','aria-label':'Data di inizio corso'});
   const stu=A.ov.students.filter(s=>s.course_ids.includes(id));
   formPage(shortName(c),'classi',()=>adminHome('classi'),[
-    fld('Nome',nm),fld('Tipo',h('input',{class:'txt',type:'text',value:KL[c.kind],readonly:true})),fld('Livello',lv),fld('Lingua',lg),fld('Docente',dc),fld('Stato',ac),
+    fld('Nome',nm),fld('Tipo',h('input',{class:'txt',type:'text',value:KL[c.kind],readonly:true})),fld('Livello',lv),fld('Lingua',lg),fld('Data di inizio corso',sd),fld('Docente',dc),fld('Stato',ac),
     h('h3',null,'Contenuti'),h('p',{class:'sub small'},st.students+' alunni · '+st.lessons+' lezioni caricate · '+st.sessions+' lezioni in calendario · '+st.whiteboards+' lavagne · '+st.announcements+' avvisi'),
     h('h3',null,'Alunni'),h('div',null,...(stu.length?stu.map(s=>h('span',{class:'ctag'},s.name)):[h('p',{class:'sub small'},'Nessun alunno.')])),
     h('h3',null,'Storico classe'),await courseHistoryBlock(id)],
-    async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:ac.value==='1'});if(x.error)throw x.error;adminHome('classi')},
+    async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:ac.value==='1',p_start:sd.value||null});if(x.error)throw x.error;adminHome('classi')},
     async()=>{
       const hasData=(st.attendance||0)>0||(st.results||0)>0||st.lessons>0||st.whiteboards>0||st.announcements>0;
-      const arch=async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:false});if(x.error)return say('Errore',x.error.message);adminHome('classi')};
+      const arch=async()=>{const x=await sb.rpc('admin_update_course',{p_id:id,p_name:nm.value,p_level:lv.value,p_language:lg.value,p_teacher:dc.value||null,p_active:false,p_start:sd.value||null});if(x.error)return say('Errore',x.error.message);adminHome('classi')};
       const del=async(force)=>{const x=await sb.rpc('admin_delete_course',{p_id:id,p_force:!!force});if(x.error)return say('Errore',x.error.message);adminHome('classi')};
       if(!hasData){
         if(!await confirmDelete('la classe '+shortName(c,true),'La classe ha solo alunni e lezioni in calendario ('+st.sessions+'); gli '+st.students+' alunni restano ma escono dalla classe.'))return;
@@ -2397,7 +2405,7 @@ function attShell(c,title,backFn,...rest){
   return mount(isAdm()?aHeader():topbar(title,backFn),isAdm()?h('div',{class:'row'},h('button',{class:'icon-btn','aria-label':'Indietro',onclick:backFn},ico('back')),h('strong',null,title)):pick,...rest,isAdm()?aTabs('cal'):tTabs('reg'),footer());
 }
 async function loadTCourses(){
-  const r=await sb.from('courses').select('id,school_id,name,level,kind,language,zoom_url,chat_url').eq('active',true).order('name');
+  const r=await sb.from('courses').select('id,school_id,name,level,kind,language,start_date,zoom_url,chat_url').eq('active',true).order('name');
   A.tCourses=sortCourses(r.data||[]);return r.error?null:A.tCourses;
 }
 async function teacherRegistro(){
