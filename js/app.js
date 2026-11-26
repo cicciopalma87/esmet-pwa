@@ -600,7 +600,7 @@ function exView(c,l,i){
   const ex=l.content.exercises[i];
   const back=()=>lessonView(c,l);
   const box=h('div',{class:'game'});
-  mount(topbar(ex.title,back),ex.instr?h('p',{class:'sub'},ex.instr):null,box,footer());
+  mount(topbar(ex.title,back),S.prev&&S.prev.fix?h('div',{class:'banner'},h('p',null,'Anteprima docente.'),h('button',{class:'secondary small',onclick:S.prev.fix},'Correggi testi')):null,ex.instr?h('p',{class:'sub'},ex.instr):null,box,footer());
   const eng=ENGINES[ex.type];
   if(!eng){box.append(h('p',null,'Questo tipo di esercizio non è ancora disponibile.'));return}
   eng(ex,box,async r=>{
@@ -2261,6 +2261,7 @@ async function teacherLessons(c,all){
     const act=[];
     const openPrev=cur=>{S.prev={back:()=>{S.prev=null;redo()},fix:()=>lessonTextFix(c,all,cur,nc=>{cur.content=nc;l.content=nc;openPrev(cur)})};lessonView(c,{id:cur.id,number:cur.number,title:cur.title,content:cur.content})};
     act.push(h('button',{class:'secondary',onclick:()=>openPrev(l)},'Anteprima'));
+    act.push(h('button',{class:'secondary',onclick:()=>lessonTextFix(c,all,l,null)},'Correggi testi'));
     act.push(h('button',{class:l.published?'secondary':'primary',onclick:async()=>{
       if(l.published&&l.n_access&&!await askYes('Rimettere in bozza?','La lezione è sbloccata per '+l.n_access+' alunni: non la vedranno più finché non la ripubblichi.','Rimetti in bozza'))return;
       const x=await sb.rpc('teacher_set_lesson_published',{p_lesson:l.id,p_pub:!l.published});
