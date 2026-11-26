@@ -48,6 +48,7 @@ async function flushQueue(){
 }
 window.addEventListener('online',flushQueue);
 async function submitResult(lesson,idx,res){
+  if(S.prev)return;
   const rec={code:S.code,lesson:lesson.id,idx,score:res.score,total:res.total,details:{wrong:res.wrong,title:res.title,type:res.type}};
   const q=qGet();q.push(rec);qSet(q);
   await flushQueue();
@@ -574,7 +575,8 @@ function lessonView(c,l){
   const rows=ex.map((e,i)=>h('button',{class:'row-item',onclick:()=>exView(c,l,i)},
     h('span',{class:'ri-l'},h('span',null,h('span',{class:'kind'},names[e.type]||e.type,e.hw?h('span',{class:'tag'},'compiti'):null),h('br'),e.title)),
     h('span',{class:'ri-r'},h('span',{class:'res'},res[i]?res[i].score+'/'+res[i].total:''),ico('chev'))));
-  mount(topbar('Lezione '+l.number,()=>homeView()),
+  mount(topbar('Lezione '+l.number,S.prev?S.prev.back:()=>homeView()),
+    S.prev?h('p',{class:'banner'},'Anteprima docente: i risultati non vengono salvati.'):null,
     h('p',{class:'sub'},l.title),
     h('div',{class:'rows'},rows),
     footer());
@@ -845,6 +847,7 @@ function teacherLogin(msg,mode){
     h('p',{class:'sub small'},h('a',{href:'./',onclick:()=>{location.hash='';setTimeout(()=>location.reload(),0)}},'← Area studenti')),footer());
 }
 async function teacherHome(){
+  S.prev=null;
   mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),h('p',{class:'sub'},'Caricamento…'),tTabs('corsi'));
   const [cs,en]=await Promise.all([
     sb.from('courses').select('id,school_id,name,level,kind,zoom_url,chat_url').eq('active',true).order('name'),
@@ -858,7 +861,7 @@ async function teacherHome(){
         h('span',{class:'ri-l'},e.students.display_name,e.section?h('span',{class:'tag'},e.section==='morning'?'mattina':e.section==='evening'?'sera':e.section):null),
         h('span',{class:'ri-r'},e.students.consent_at?'':h('span',{class:'small'},'consenso mancante'),ico('chev'))))),
       h('div',{class:'row'},
-        h('button',{class:'primary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
+        h('button',{class:'primary',onclick:()=>teacherLessons(c,cs.data)},'Lezioni ed esercizi'),h('button',{class:'secondary',onclick:()=>unlockView(c)},'Sblocca lezioni'),
         h('button',{class:'secondary',onclick:()=>teacherAnnouncements(c)},'Avvisi'),h('button',{class:'secondary',onclick:()=>teacherWhiteboards(c)},'Lavagne'),h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link della chat','Gruppo WhatsApp: incolla il link d’invito. Chat singola: https://wa.me/39… (lascia vuoto per cancellare)',c.chat_url||'','Salva');if(v===null)return;const u=v.trim();if(u&&!/^https:\/\//.test(u)){await say('Link non valido','Il link deve iniziare con https://');return}const {error}=await sb.from('courses').update({chat_url:u||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.chat_url?'Chat ✓':'Chat'),c.chat_url?h('a',{class:'secondary btnlink',href:c.chat_url,target:'_blank',rel:'noopener'},'Apri chat'):null,h('button',{class:'secondary',onclick:async()=>{const v=await askText('Link Zoom del corso','Incolla il link (lascia vuoto per cancellarlo)',c.zoom_url||'','Salva');if(v===null)return;const {error}=await sb.from('courses').update({zoom_url:v.trim()||null}).eq('id',c.id);if(error)await say('Non salvato',error.message);teacherHome()}},c.zoom_url?'Link Zoom ✓':'Link Zoom'),h('button',{class:'secondary',onclick:()=>teacherAttendance(c)},'Presenze del corso'),h('button',{class:'secondary',onclick:()=>courseHistoryView(c)},'Storico classe')));
   });
   mount(tHeader(),h('h2',{class:'sect'},'Corsi e alunni'),blocks.length?blocks:h('p',{class:'sub'},'Nessun corso assegnato.'),tTabs('corsi'),footer());
@@ -1762,6 +1765,293 @@ async function teacherAnnouncements(c){
     ls.data.map(a=>h('div',{class:'card ann'},h('div',{class:'row'},h('strong',null,a.title),h('span',{class:'sub small'},fmtDate(a.created_at))),a.body?h('p',{class:'ann-b'},a.body):null,
       h('button',{class:'linkbtn small',onclick:async()=>{if(!await askYes('Eliminare l’avviso?','Gli alunni non lo vedranno più.','Elimina'))return;await sb.from('announcements').delete().eq('id',a.id);teacherAnnouncements(c)}},'Elimina'))),
     footer());
+}
+
+/* ---------- lezioni ed esercizi: importazione da file, bozze, anteprima ---------- */
+function jsLit(src,pos,env){
+  let i=pos;
+  const bad=m=>{const e=new Error(m);e.at=i;throw e};
+  const ws=()=>{for(;;){const c=src[i];
+    if(c===' '||c==='\n'||c==='\t'||c==='\r'||c===' '||c==='﻿'){i++;continue}
+    if(c==='/'&&src[i+1]==='/'){while(i<src.length&&src[i]!=='\n')i++;continue}
+    if(c==='/'&&src[i+1]==='*'){const e=src.indexOf('*/',i+2);if(e<0)bad('commento non chiuso');i=e+2;continue}
+    break}};
+  const str=()=>{const q=src[i++];let o='';
+    while(i<src.length){const c=src[i++];
+      if(c===q)return o;
+      if(c==='\\'){const n=src[i++];
+        if(n==='n')o+='\n';else if(n==='t')o+='\t';else if(n==='r')o+='\r';
+        else if(n==='u'){o+=String.fromCharCode(parseInt(src.substr(i,4),16));i+=4}
+        else if(n!=='\n')o+=n}
+      else if(c==='\n')bad('testo non chiuso (manca una virgoletta)');
+      else o+=c}
+    bad('testo non chiuso (manca una virgoletta)')};
+  const val=()=>{
+    ws();const c=src[i];
+    if(c===undefined)bad('il file finisce a metà');
+    if(c==='['){i++;const a=[];for(;;){ws();if(src[i]===']'){i++;return a}a.push(val());ws();
+      if(src[i]===','){i++;continue}if(src[i]===']'){i++;return a}bad('manca una virgola o la parentesi chiusa ]')}}
+    if(c==='{'){i++;const o={};for(;;){ws();if(src[i]==='}'){i++;return o}
+      let k;if(src[i]==='"'||src[i]==="'")k=str();else{const m=/^[A-Za-z_$0-9][\w$]*/.exec(src.slice(i,i+80));if(!m)bad('nome di campo non valido');i+=m[0].length;k=m[0]}
+      ws();if(src[i]!==':')bad('manca “:” dopo «'+k+'»');i++;o[k]=val();ws();
+      if(src[i]===','){i++;continue}if(src[i]==='}'){i++;return o}bad('manca una virgola o la parentesi chiusa }')}}
+    if(c==='"'||c==="'")return str();
+    if(c==='`')bad('i testi tra apici inversi non sono supportati');
+    if(c==='-'||(c>='0'&&c<='9')){const m=/^-?\d+(\.\d+)?/.exec(src.slice(i,i+30));if(!m)bad('numero non valido');i+=m[0].length;return Number(m[0])}
+    const m=/^[A-Za-z_$][\w$]*/.exec(src.slice(i,i+80));if(!m)bad('carattere inatteso «'+c+'»');i+=m[0].length;const name=m[0];
+    if(name==='true')return true;if(name==='false')return false;if(name==='null'||name==='undefined')return null;
+    ws();
+    if(src[i]==='('){
+      if(name!=='mk')bad('la funzione «'+name+'» non è prevista');
+      i++;const args=[];for(;;){ws();if(src[i]===')'){i++;break}args.push(val());ws();
+        if(src[i]===','){i++;continue}if(src[i]===')'){i++;break}bad('manca una virgola o la parentesi chiusa )')}
+      return Object.assign({t:args[0],h:args[1],c:args[2],r:args[3]},args[4]||{});
+    }
+    if(Object.prototype.hasOwnProperty.call(env,name))return env[name];
+    bad('«'+name+'» non è un dato noto');
+  };
+  const v=val();return {v,end:i};
+}
+const LKIND={'Flash cards':'flash','Match up':'match','Matching pairs':'match','Find the match':'match','Quiz':'quiz','Unjumble':'unjumble','Complete the sentence':'cloze','Group sort':'group','Spin the wheel':'cards','Open the box':'cards','Speaking cards':'cards'};
+const LALIAS={'flash':'Flash cards','abbina':'Match up','quiz':'Quiz','riordina':'Unjumble','completa':'Complete the sentence','gruppi':'Group sort','carte':'Speaking cards'};
+const LNAME={flash:'Flash cards',match:'Abbina',quiz:'Quiz',unjumble:'Riordina la frase',cloze:'Completa la frase',group:'Dividi in gruppi',cards:'Carte per parlare'};
+const MATCH_T=['Match up','Matching pairs','Find the match'];
+const WW_INSTR=/wordwall|double sided|crea (tre|due|quattro) gruppi|domanda, risposta corretta|per ogni riga|parentesi quadre|a due a due come un memory|editor/i;
+function lineOf(text,pos){let n=1;for(let k=0;k<pos&&k<text.length;k++)if(text.charCodeAt(k)===10)n++;return n}
+function mergeLessons(L,ADD){
+  return L.map(l0=>{
+    const l={n:l0.n,t:l0.t,ex:(l0.ex||[]).slice()};
+    ((ADD&&ADD[l.n])||[]).forEach(a=>l.ex.push(a));
+    const fl=l.ex.filter(x=>x.t==='Flash cards');l.ex=l.ex.filter(x=>x.t!=='Flash cards');
+    fl.forEach(f=>{f.extra=1});
+    if(!fl.length){const m=l.ex.find(x=>MATCH_T.includes(x.t)&&!x.nf&&Array.isArray(x.c)&&x.c[0]!=='Domanda'&&Array.isArray(x.r));
+      if(m)fl.push({t:'Flash cards',h:'Flash card: '+m.h,c:m.c,r:m.r,extra:1})}
+    fl.forEach(f=>l.ex.push(f));
+    l.ex.sort((a,b)=>(a.extra?1:0)-(b.extra?1:0));
+    return l});
+}
+/* legge il file HTML di Francesca (const L e const ADD) senza eseguirlo */
+function readLessonHtml(text){
+  const env={},warn=[];
+  const declRe=/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*/g;let m;
+  while((m=declRe.exec(text))){
+    const nm=m[1];if(nm==='L'||nm==='ADD')continue;
+    try{let r=jsLit(text,m.index+m[0].length,env);env[nm]=r.v;let j=r.end;
+      for(;;){const mm=/^\s*,\s*([A-Za-z_$][\w$]*)\s*=\s*/.exec(text.slice(j,j+200));if(!mm)break;
+        const r2=jsLit(text,j+mm[0].length,env);env[mm[1]]=r2.v;j=r2.end}
+    }catch(e){}
+  }
+  const get=(name,must)=>{
+    const mm=new RegExp('\\bconst\\s+'+name+'\\s*=\\s*').exec(text);
+    if(!mm){if(must)throw new Error('Non trovo l’elenco delle lezioni (const '+name+' = […]) nel file. È il file degli esercizi di Francesca?');return null}
+    try{return jsLit(text,mm.index+mm[0].length,env).v}
+    catch(e){throw new Error('Errore nel file alla riga '+lineOf(text,e.at||mm.index)+': '+e.message)}
+  };
+  const L=get('L',true),ADD=get('ADD',false);
+  if(!Array.isArray(L))throw new Error('L’elenco delle lezioni nel file non è nel formato atteso.');
+  const patched=new Set();let pm;const pr=/\bL\[(\d+)\]\.ex/g;while((pm=pr.exec(text)))patched.add(+pm[1]+1);
+  const present=new Set(L.map(x=>x.n));
+  patched.forEach(n=>present.has(n)&&warn.push('La lezione '+n+' ha correzioni scritte direttamente nel codice del file: l’app non le legge. Controlla l’anteprima di quella lezione.'));
+  return {lessons:mergeLessons(L,ADD||{}),warnings:warn};
+}
+function readLessonJson(text){
+  let d;try{d=JSON.parse(text)}catch(e){throw new Error('Il file non è un JSON valido: '+e.message)}
+  const arr=Array.isArray(d)?d:(d.lezioni||[d]);
+  const lessons=arr.map(x=>({n:x.numero,t:x.titolo,ex:(x.esercizi||[]).map(e=>({
+    t:LALIAS[String(e.tipo||'').toLowerCase()]||e.tipo,h:e.titolo,s:e.istruzioni||'',hw:!!e.compiti,nf:!!e.senza_flash,c:e.colonne||[],r:e.righe}))}));
+  return {lessons:mergeLessons(lessons,{}),warnings:[]};
+}
+function readLessonFile(text){
+  text=String(text||'').replace(/^﻿/,'');
+  return /^\s*[\[{]/.test(text)?readLessonJson(text):readLessonHtml(text);
+}
+/* trasforma una lezione del file nel formato dell’app e controlla gli errori */
+function mapLesson(l){
+  const probs=[],exs=[];
+  if(!Number.isInteger(l.n)||l.n<1||l.n>200)probs.push('Una lezione ha un numero non valido ('+l.n+').');
+  if(!l.t||!String(l.t).trim())probs.push('Lezione '+l.n+': manca il titolo.');
+  if(!Array.isArray(l.ex)||!l.ex.length)probs.push('Lezione '+l.n+': non ha esercizi.');
+  (l.ex||[]).forEach((x,i)=>{
+    const P=(row,msg)=>probs.push('Lezione '+l.n+' · esercizio '+(i+1)+(x&&x.h?' «'+x.h+'»':'')+(row?', riga '+row:'')+': '+msg);
+    const type=LKIND[x.t];
+    if(!type)return P(0,'il tipo «'+x.t+'» non è riconosciuto (tipi ammessi: '+Object.keys(LKIND).join(', ')+').');
+    if(!x.h||!String(x.h).trim())P(0,'manca il titolo.');
+    if(!Array.isArray(x.r)||!x.r.length)return P(0,'non ci sono righe.');
+    const o={id:'e'+(i+1),type,title:String(x.h||'').trim(),instr:(x.s&&!WW_INSTR.test(x.s))?String(x.s).trim():''};
+    if(x.hw)o.hw=true;
+    const items=[],groups=[];
+    x.r.forEach((row,k)=>{
+      const n=k+1;
+      if(!Array.isArray(row))return P(n,'la riga non è un elenco di celle.');
+      const r=row.map(c=>String(c==null?'':c).trim());
+      if(!r.some(Boolean))return P(n,'riga vuota.');
+      const id=o.id+'.'+(items.length+1);
+      if(type==='quiz'){
+        const w=r.slice(2).filter(Boolean);
+        if(!r[0]||!r[1])return P(n,'servono la domanda e la risposta corretta.');
+        if(!w.length)return P(n,'serve almeno una risposta errata.');
+        if(w.includes(r[1]))P(n,'una risposta errata è uguale a quella corretta.');
+        items.push({id,q:r[0],a:r[1],w});
+      }else if(type==='match'){
+        if(!r[0]||!r[1])return P(n,'servono due celle: sinistra e destra.');
+        items.push({id,l:r[0],r:r[1]});
+      }else if(type==='cloze'){
+        const found=r[0].match(/\[[^\[\]]*\]/g)||[];
+        if(!found.length)return P(n,'manca la parola da indovinare tra parentesi quadre [ ].');
+        if(found.length>1)return P(n,'c’è più di una parola tra parentesi quadre: ne serve una sola per riga.');
+        const at=r[0].indexOf(found[0]),ans=found[0].slice(1,-1).trim();
+        if(!ans)return P(n,'le parentesi quadre sono vuote.');
+        items.push({id,pre:r[0].slice(0,at),ans,post:r[0].slice(at+found[0].length)});
+      }else if(type==='unjumble'){
+        if(!r[0])return P(n,'manca la frase.');
+        if(r[0].split(/\s+/).length<2)P(n,'la frase ha una sola parola.');
+        items.push({id,s:[r[0]]});
+      }else if(type==='cards'){
+        if(!r[0])return P(n,'manca il testo della carta.');
+        items.push({id,t:r[0]});
+      }else if(type==='group'){
+        const el=r.slice(1).filter(Boolean);
+        if(!r[0]||!el.length)return P(n,'servono il nome del gruppo e almeno un elemento.');
+        const g=groups.length;groups.push(r[0]);
+        el.forEach(t=>items.push({id:o.id+'.'+(items.length+1),g,t}));
+      }else if(type==='flash'){
+        if(!r[0]||!r[1])return P(n,'servono due celle: fronte e retro.');
+        items.push({id,f:r[0],b:r[1]});
+      }
+    });
+    if(type==='match'&&items.length<2)P(0,'servono almeno due coppie.');
+    if(type==='group'&&groups.length<2)P(0,'servono almeno due gruppi.');
+    if(!items.length)return P(0,'nessuna riga utilizzabile.');
+    if(type==='group')o.groups=groups;
+    if(type==='flash'){if(Array.isArray(x.c))o.cols=x.c.slice(0,2);o.extra=true}
+    o.items=items;exs.push(o);
+  });
+  return {number:l.n,title:String(l.t||'').trim(),content:{exercises:exs},problems:probs};
+}
+function canon(v){
+  if(Array.isArray(v))return '['+v.map(canon).join(',')+']';
+  if(v&&typeof v==='object')return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}';
+  return JSON.stringify(v);
+}
+const errIt=e=>String((e&&e.message)||e||'Errore').replace(/^ESERCIZI_BLOCCATI:\s*/,'');
+function exSummary(content){
+  return (content.exercises||[]).map((e,i)=>(i+1)+'. '+(LNAME[e.type]||e.type)+' · '+e.title+' ('+e.items.length+')').join('\n');
+}
+/* ---- schermata del docente: elenco lezioni ---- */
+async function teacherLessons(c,all){
+  all=all||[c];S.prev=null;
+  const back=()=>teacherHome();
+  mount(topbar('Lezioni ed esercizi',back),h('p',{class:'sub'},'Caricamento…'));
+  const r=await sb.rpc('teacher_lessons_overview',{p_course:c.id});
+  if(r.error)return mount(topbar('Lezioni ed esercizi',back),h('p',{class:'err'},'Errore nel caricamento.'),footer());
+  const ls=r.data||[];
+  const pick=all.length>1?selEl(all.map(x=>[x.id,x.name]),c.id,'Classe'):null;
+  if(pick)pick.onchange=()=>teacherLessons(all.find(x=>x.id===pick.value),all);
+  const redo=()=>teacherLessons(c,all);
+  const fileIn=h('input',{type:'file',accept:'.html,.htm,.json,.txt,text/html,application/json,text/plain',style:'display:none',onchange:async()=>{
+    const f=fileIn.files&&fileIn.files[0];if(!f)return;
+    let txt;try{txt=await f.text()}catch(e){return say('File non leggibile','Non riesco a leggere il file. Riprova.')}
+    lessonImportPreview(c,all,ls,txt,f.name)}});
+  const others=all.filter(x=>x.id!==c.id&&x.level===c.level);
+  const copyBtn=others.length?h('button',{class:'secondary',onclick:async()=>{
+    const sel=selEl(others.map(x=>[x.id,x.name]),others[0].id,'Classe da cui copiare');
+    const v=await dlg('Copia il programma da un’altra classe',[
+      h('p',{class:'sub small'},'Copio in «'+c.name+'» le lezioni che qui non esistono ancora, come bozze. Le lezioni già presenti non vengono toccate. Dopo la copia le due classi vanno avanti ciascuna per conto suo: una modifica a una non cambia l’altra.'),sel],
+      close=>[h('button',{class:'secondary',onclick:()=>close(null)},'Annulla'),h('button',{class:'primary',onclick:()=>close(sel.value)},'Copia')]);
+    if(!v)return;
+    const x=await sb.rpc('teacher_copy_program',{p_from:v,p_to:c.id});
+    if(x.error)return say('Non copiato',errIt(x.error));
+    await say('Fatto',x.data?('Copiate '+x.data+' lezioni come bozza. Controllale e pubblicale quando sono pronte.'):'Non c’era nessuna lezione nuova da copiare.');redo();
+  }},'Copia programma da un’altra classe'):null;
+  const card=l=>{
+    const act=[];
+    act.push(h('button',{class:'secondary',onclick:()=>{S.prev={back:()=>{S.prev=null;redo()}};lessonView(c,{id:l.id,number:l.number,title:l.title,content:l.content})}},'Anteprima'));
+    act.push(h('button',{class:l.published?'secondary':'primary',onclick:async()=>{
+      if(l.published&&l.n_access&&!await askYes('Rimettere in bozza?','La lezione è sbloccata per '+l.n_access+' alunni: non la vedranno più finché non la ripubblichi.','Rimetti in bozza'))return;
+      const x=await sb.rpc('teacher_set_lesson_published',{p_lesson:l.id,p_pub:!l.published});
+      if(x.error)return say('Non riuscito',errIt(x.error));
+      if(!l.published)await say('Pubblicata','La lezione è pronta. Per farla vedere agli alunni usa «Sblocca lezioni».');
+      redo()}},l.published?'Rimetti in bozza':'Pubblica'));
+    act.push(h('button',{class:'secondary',onclick:async()=>{
+      const v=await askText('Titolo della lezione '+l.number,'Cambia il titolo come preferisci.',l.title,'Salva');
+      if(v==null)return;const t=v.trim();if(!t||t===l.title)return;
+      const x=await sb.from('lessons').update({title:t}).eq('id',l.id);
+      if(x.error)return say('Non salvato',errIt(x.error));redo()}},'Rinomina'));
+    if(l.n_backups>0)act.push(h('button',{class:'linkbtn small',onclick:async()=>{
+      if(!await askYes('Tornare alla versione precedente?','La lezione '+l.number+' torna a com’era prima dell’ultima sostituzione. La versione attuale diventa a sua volta la «precedente», quindi puoi tornare indietro.','Ripristina'))return;
+      const x=await sb.rpc('teacher_restore_lesson',{p_lesson:l.id});
+      if(x.error)return say('Non ripristinata',errIt(x.error));redo()}},'Ripristina versione precedente'));
+    return h('div',{class:'card'},
+      h('strong',null,'Lezione '+l.number+' · '+l.title),
+      h('p',{class:'sub small'},h('span',{class:'pill '+(l.published?'g':'n')},l.published?'Pubblicata':'Bozza'),' '+l.n_ex+' esercizi'+(l.has_results?' · 🔒 con esercizi già svolti dagli alunni':'')),
+      h('div',{class:'row'},act));
+  };
+  mount(topbar('Lezioni ed esercizi',back),
+    pick,
+    h('p',{class:'sub'},c.name),
+    h('div',{class:'row'},h('button',{class:'primary',onclick:()=>fileIn.click()},'Carica lezioni da file'),copyBtn),fileIn,
+    h('p',{class:'sub small'},'Le lezioni caricate restano in bozza finché non le pubblichi: provale con «Anteprima», cambia i titoli e poi pubblica. Quando gli alunni hanno già svolto degli esercizi, quelli non si possono più cambiare: puoi solo rinominare la lezione o aggiungere esercizi in fondo.'),
+    ls.length?ls.map(card):h('p',{class:'sub'},'Nessuna lezione in questa classe.'),
+    footer());
+}
+/* ---- anteprima dell’importazione ---- */
+function lessonImportPreview(c,all,existing,text,fname){
+  const back=()=>teacherLessons(c,all);
+  let parsed;
+  try{parsed=readLessonFile(text)}catch(e){return say('File non letto',e.message)}
+  if(!parsed.lessons.length)return say('File vuoto','Nel file non ci sono lezioni.');
+  const seen={};parsed.lessons.forEach(l=>{seen[l.n]=(seen[l.n]||0)+1});
+  const rows=parsed.lessons.map(l=>{
+    const m=mapLesson(l);const ex=existing.find(e=>e.number===m.number);
+    let state='new',note='Nuova lezione: verrà creata come bozza.';
+    if(seen[m.number]>1)m.problems.push('Lezione '+m.number+': nel file compare più di una volta.');
+    if(ex){
+      const oldEx=(ex.content&&ex.content.exercises)||[];
+      if(ex.has_results){
+        const same=oldEx.every((e,i)=>m.content.exercises[i]&&canon(m.content.exercises[i])===canon(e));
+        if(!same)m.problems.push('Lezione '+m.number+': gli alunni hanno già svolto esercizi di questa lezione e nel file i primi '+oldEx.length+' sono diversi da quelli già presenti: non si possono sostituire.');
+        else if(m.content.exercises.length===oldEx.length){state='same';note='Identica a quella già presente: niente da fare.'}
+        else{state='append';note='Ha esercizi già svolti: verranno solo aggiunti '+(m.content.exercises.length-oldEx.length)+' esercizi in fondo'+(ex.published?' e gli alunni riceveranno una notifica.':'.')}
+      }else if(canon(ex.content)===canon(m.content)){state='same';note='Identica a quella già presente: niente da fare.'}
+      else{state='replace';note='Sostituisce la lezione già presente'+(ex.published?' (ora pubblicata: tornerà in bozza; la versione attuale resta ripristinabile).':' (è già una bozza; la versione attuale resta ripristinabile).')}
+    }
+    if(m.problems.length)note=ex?'Lezione già presente in questa classe.':'';
+    return {m,ex,state,note};
+  });
+  const ok=r=>!r.m.problems.length&&r.state!=='same';
+  const boxes=[];
+  const cards=rows.map(r=>{
+    const cb=h('input',{type:'checkbox',id:'imp'+r.m.number});cb.checked=ok(r);cb.disabled=!ok(r);
+    const ti=h('input',{class:'txt',type:'text',value:r.m.title,maxlength:'160','aria-label':'Titolo lezione '+r.m.number});
+    if(r.state==='append'||r.state==='same')ti.disabled=true;
+    boxes.push({r,cb,ti});
+    return h('div',{class:'card'},
+      h('label',{for:'imp'+r.m.number,class:'chk-row'},cb,h('strong',null,' Lezione '+r.m.number)),
+      h('label',null,'Titolo',ti),
+      r.ex&&r.ex.title!==r.m.title?h('p',{class:'sub small'},'Titolo attuale: '+r.ex.title):null,
+      h('p',{class:'sub small'},r.note),
+      r.m.problems.length?h('div',{class:'err',role:'alert'},r.m.problems.map(p=>h('p',{class:'small'},p))):null,
+      !r.m.problems.length?h('pre',{class:'small',style:'white-space:pre-wrap;margin:0;font-family:inherit'},exSummary(r.m.content)):null);
+  });
+  const nothing=!rows.some(ok);
+  const go=h('button',{class:'primary',disabled:nothing,onclick:async()=>{
+    const sel=boxes.filter(b=>b.cb.checked);
+    if(!sel.length)return say('Niente da importare','Seleziona almeno una lezione.');
+    go.disabled=true;const out=[];
+    for(const b of sel){
+      const title=b.ti.value.trim()||b.r.m.title;
+      const x=await sb.rpc('teacher_import_lesson',{p_course:c.id,p_number:b.r.m.number,p_title:title,p_content:b.r.m.content});
+      out.push('Lezione '+b.r.m.number+': '+(x.error?'NON importata — '+errIt(x.error):({created:'creata come bozza',replaced:'sostituita, ora è una bozza',appended:'esercizi aggiunti in fondo'})[x.data&&x.data.status]||'ok'));
+    }
+    await say('Importazione terminata',out.join('\n'));
+    back();
+  }},'Importa come bozza');
+  mount(topbar('Carica lezioni',back),
+    h('p',{class:'sub'},'File: '+fname+' · '+rows.length+' lezioni trovate. Scegli quali importare: le lezioni nuove o cambiate sono già selezionate.'),
+    parsed.warnings.length?h('div',{class:'card'},parsed.warnings.map(w=>h('p',{class:'small'},'⚠ '+w))):null,
+    h('p',{class:'sub small'},'Le istruzioni pensate per creare gli esercizi su Wordwall non vengono mostrate agli alunni.'),
+    cards,
+    h('div',{class:'row'},go,h('button',{class:'secondary',onclick:back},'Annulla')),footer());
 }
 
 /* --- sblocco lezioni per gruppo di alunni --- */
