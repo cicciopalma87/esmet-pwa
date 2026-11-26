@@ -1872,8 +1872,19 @@ function readLessonHtml(text){
   if(!Array.isArray(L))throw new Error('L’elenco delle lezioni nel file non è nel formato atteso.');
   const patched=new Set();let pm;const pr=/\bL\[(\d+)\]\.ex/g;while((pm=pr.exec(text)))patched.add(+pm[1]+1);
   const present=new Set(L.map(x=>x.n));
-  patched.forEach(n=>present.has(n)&&warn.push('La lezione '+n+' ha correzioni scritte direttamente nel codice del file: l’app non le legge. Controlla l’anteprima di quella lezione.'));
-  return {lessons:mergeLessons(L,ADD||{}),warnings:warn};
+  /* aggiunte "a parte" in coda al file: L[i].ex.find(x => x.t === 'Match up') … .r.push([..],[..]) */
+  const patches=[];const pf=/\bL\[(\d+)\]\.ex\.find\(\s*\(?\s*\w+\s*\)?\s*=>\s*\w+\.t\s*===\s*(['"])(.*?)\2\s*\)/g;let fm;
+  while((fm=pf.exec(text))){
+    const rest=text.slice(fm.index,fm.index+600),pp=/\.r\.push\(\s*/.exec(rest);if(!pp)continue;
+    try{let at=fm.index+pp.index+pp[0].length;const rows=[];
+      for(;;){const r=jsLit(text,at,env);if(!Array.isArray(r.v))break;rows.push(r.v);at=r.end;
+        const mm=/^\s*,\s*/.exec(text.slice(at,at+40));if(!mm)break;at+=mm[0].length}
+      if(rows.length)patches.push({n:+fm[1]+1,t:fm[3],rows});
+    }catch(e){}
+  }
+  const patchedN=new Set(patches.map(x=>x.n));
+  patched.forEach(n=>present.has(n)&&!patchedN.has(n)&&warn.push('La lezione '+n+' ha correzioni scritte direttamente nel codice del file: l’app non le legge. Controlla l’anteprima di quella lezione.'));
+  return {lessons:mergeLessons(L,ADD||{}),warnings:warn,patches:patches.filter(x=>present.has(x.n))};
 }
 function readLessonJson(text){
   let d;try{d=JSON.parse(text)}catch(e){throw new Error('Il file non è un JSON valido: '+e.message)}
@@ -2031,11 +2042,19 @@ async function teacherLessons(c,all){
     footer());
 }
 /* ---- anteprima dell’importazione ---- */
-function lessonImportPreview(c,all,existing,text,fname){
+function lessonImportPreview(c,all,existing,text,fname,withPatch){
   const back=()=>teacherLessons(c,all);
   let parsed;
   try{parsed=readLessonFile(text)}catch(e){return say('File non letto',e.message)}
   if(!parsed.lessons.length)return say('File vuoto','Nel file non ci sono lezioni.');
+  const patchInfo=[];
+  (parsed.patches||[]).forEach(pt=>{
+    const l=parsed.lessons.find(x=>x.n===pt.n);const ex=l&&l.ex.find(x=>x.t===pt.t);if(!ex||!Array.isArray(ex.r))return;
+    const have=new Set(ex.r.map(r=>JSON.stringify(r)));const add=pt.rows.filter(r=>!have.has(JSON.stringify(r)));
+    if(!add.length)return;
+    patchInfo.push({n:pt.n,h:ex.h,k:add.length});
+    if(withPatch)ex.r=ex.r.concat(add);
+  });
   const seen={};parsed.lessons.forEach(l=>{seen[l.n]=(seen[l.n]||0)+1});
   const rows=parsed.lessons.map(l=>{
     const m=mapLesson(l);const ex=existing.find(e=>e.number===m.number);
@@ -2085,6 +2104,10 @@ function lessonImportPreview(c,all,existing,text,fname){
   mount(topbar('Carica lezioni',back),
     h('p',{class:'sub'},'File: '+fname+' · '+rows.length+' lezioni trovate. Scegli quali importare: le lezioni nuove o cambiate sono già selezionate.'),
     parsed.warnings.length?h('div',{class:'card'},parsed.warnings.map(w=>h('p',{class:'small'},'⚠ '+w))):null,
+    patchInfo.length?h('div',{class:'card'},
+      h('p',null,'Trovate delle aggiunte scritte a parte in fondo al file (una correzione successiva, non nell’elenco delle lezioni):'),
+      patchInfo.map(q=>h('p',{class:'small'},'• Lezione '+q.n+', esercizio «'+q.h+'»: '+q.k+(q.k===1?' voce in più':' voci in più'))),
+      h('label',{class:'chk-row'},(()=>{const cb=h('input',{type:'checkbox'});cb.checked=!!withPatch;cb.addEventListener('change',()=>lessonImportPreview(c,all,existing,text,fname,cb.checked));return cb})(),h('strong',null,' Vuoi aggiungerle come voci?'))):null,
     h('p',{class:'sub small'},'Le istruzioni pensate per creare gli esercizi su Wordwall non vengono mostrate agli alunni.'),
     cards,
     h('div',{class:'row'},go,h('button',{class:'secondary',onclick:back},'Annulla')),footer());
