@@ -947,9 +947,30 @@ async function teacherWhiteboards(c){
   const byN={};list.forEach(w=>(byN[w.lesson]=byN[w.lesson]||[]).push(w));
   const groups=Object.keys(byN).sort((a,b)=>b-a).map(n=>h('div',{class:'card'},h('h3',null,'Lezione '+n),
     h('div',{class:'wb-grid'},byN[n].map(w=>h('div',{class:'wb-cell'},wbThumb(w,()=>wbPreview(w)),
-      h('button',{class:'linkbtn small',onclick:async()=>{
-        if(!await askYes('Eliminare la lavagna?','Gli alunni non la vedranno più.','Elimina'))return;
-        await sb.from('whiteboards').delete().eq('id',w.id);await sb.storage.from('lavagne').remove([w.path]);teacherWhiteboards(c)}},'Elimina'))))));
+      h('div',{class:'row wb-act'},
+        h('button',{class:'secondary small',onclick:async()=>{
+          const fi=h('input',{type:'file',accept:'image/*,application/pdf'});
+          const note=h('textarea',{class:'txt',rows:'2',placeholder:'Perché la sostituisci? (facoltativo, lo vedono gli alunni)','aria-label':'Motivo della sostituzione'});
+          const err=h('p',{class:'err'});
+          const ok=await dlg('Sostituisci la lavagna · lezione '+w.lesson,[h('p',{class:'sub small'},'Scegli il nuovo file. Gli alunni del corso riceveranno una notifica per riscaricarla.'),fi,note,err],close=>[
+            h('button',{class:'secondary',onclick:()=>close(false)},'Annulla'),
+            h('button',{class:'primary',onclick:async e=>{
+              const f=fi.files[0];if(!f){err.textContent='Scegli un file.';return}
+              e.target.disabled=true;err.textContent='';
+              const ext=((f.name.split('.').pop()||'bin')+'').toLowerCase().replace(/[^a-z0-9]/g,'');
+              const path=c.id+'/'+crypto.randomUUID()+'.'+ext;
+              const u=await sb.storage.from('lavagne').upload(path,f,{contentType:f.type||undefined});
+              if(u.error){err.textContent='Caricamento non riuscito: '+u.error.message;e.target.disabled=false;return}
+              const r=await sb.rpc('teacher_replace_whiteboard',{p_id:w.id,p_path:path,p_mime:f.type||null,p_note:note.value.trim()||null});
+              if(r.error){await sb.storage.from('lavagne').remove([path]);err.textContent='Sostituzione non riuscita: '+r.error.message;e.target.disabled=false;return}
+              if(r.data)await sb.storage.from('lavagne').remove([r.data]);
+              close(true)}},'Sostituisci')]);
+          if(ok)teacherWhiteboards(c)}},'Sostituisci'),
+        h('button',{class:'secondary small',onclick:async()=>{
+          if(!await askYes('Eliminare la lavagna?','Gli alunni non la vedranno più. L’operazione non si può annullare.','Elimina'))return;
+          const d=await sb.from('whiteboards').delete().eq('id',w.id);
+          if(d.error){await say('Non eliminata',d.error.message);return}
+          await sb.storage.from('lavagne').remove([w.path]);teacherWhiteboards(c)}},'Elimina')))))));
   mount(topbar('Lavagne · '+c.name,back),
     h('div',{class:'card'},h('h3',null,'Carica una lavagna'),h('p',{class:'sub small'},'Foto/screenshot o PDF (max 20 MB). Gli alunni del corso la vedono subito nella sezione Lavagne, sotto il numero di lezione indicato.'),num,ttl,file,up,msg),
     groups.length?groups:h('p',{class:'sub'},'Ancora nessuna lavagna caricata.'),footer());
