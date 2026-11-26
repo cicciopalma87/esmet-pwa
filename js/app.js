@@ -1028,7 +1028,7 @@ function aDrawer(){
 function aTabs(active){
   const an=['alunni','classi','docenti'].includes(active)?'anag':active;
   const t=(id,label,em,fn)=>h('button',{class:'tab'+(an===id?' on':''),onclick:fn},h('span',{class:'em','aria-hidden':'true'},em),h('span',null,label));
-  return h('nav',{class:'tabbar'},t('anag','Anagrafiche','🗂️',()=>adminHome('alunni')),t('cal','Calendario','📅',()=>adminMonth()),t('conto','Contabilità','💶',()=>adminConto('entrate')));
+  return h('nav',{class:'tabbar'},t('anag','Anagrafiche','🗂️',()=>adminHome('alunni')),t('cal','Calendario','📅',()=>adminMonth()),t('rep','Report','📊',()=>adminReports()),t('conto','Contabilità','💶',()=>adminConto('entrate')));
 }
 function aHeader(){
   return h('div',{class:'thead2'},h('div',{class:'thead-top'},
@@ -1869,7 +1869,7 @@ const REPORTS={
   presenze:{t:'Presenze',d:'Presenze, assenze e percentuale per alunno e corso (solo lezioni tenute con presenza segnata).',f:['period','kind','level','course','teacher','student','state']},
   alunni_corsi:{t:'Corsi frequentati dagli alunni',d:'Per ogni alunno i corsi frequentati, con docente, date e stato.',f:['period','kind','level','course','teacher','student','state']},
   corsi:{t:'Corsi per livello',d:'Corsi attivi e conclusi con quanti e quali alunni (attuali e totali nello storico).',f:['period','kind','level','course','teacher','student','state']},
-  docenti:{t:'Docenti e classi',d:'Classi assegnate a ogni docente (anche passate), lezioni tenute, blocchi da 10 per le individuali (senza livello) e corso completo solo per A1 gruppo (20 lezioni).',f:['period','kind','level','course','teacher','student','state']},
+  docenti:{t:'Docenti e classi',d:'Classi assegnate a ogni docente (anche passate), lezioni tenute, blocchi da 10 per le individuali (senza livello) e corso completo per i gruppi (A1-A2 20, B1-B2 60, C1-C2 80 lezioni).',f:['period','kind','level','course','teacher','student','state']},
   percorsi:{t:'Percorsi di livello',d:'Alunni che sono passati ai livelli successivi (A1, A2, B1…) con il docente di ogni livello. Cercando un docente: i suoi alunni e dove hanno continuato.',f:['kind','teacher','student','continued']}
 };
 function csvDownload(name,cols,rows){
@@ -1879,7 +1879,7 @@ function csvDownload(name,cols,rows){
   const a=h('a',{href:url,download:name});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
 }
 async function adminReports(pre){
-  if(!A.ov||!A.staff){try{await adminLoad()}catch(e){return mount(aHeader(),h('p',{class:'err'},'Non riesco a caricare i dati.'),aTabs('anag'),footer())}}
+  if(!A.ov||!A.staff){try{await adminLoad()}catch(e){return mount(aHeader(),h('p',{class:'err'},'Non riesco a caricare i dati.'),aTabs('rep'),footer())}}
   const R=pre||A.rep||{type:'presenze',v:{}};A.rep=R;
   const hist=LS.get('esmet_rep_hist',[]);
   const type=selEl(Object.entries(REPORTS).map(([k,r])=>[k,r.t]),R.type,'Report');
@@ -1929,7 +1929,7 @@ async function adminReports(pre){
   const go=h('button',{class:'primary',onclick:()=>run()},'Cerca');
   const recent=hist.length?h('div',{class:'card'},h('p',{class:'sub small'},'Report usati più spesso'),h('div',null,hist.slice(0,5).map(x=>h('button',{class:'ctag',style:'border:0;cursor:pointer',onclick:()=>adminReports({type:x.type,v:x.v}).then(()=>{})},REPORTS[x.type]?REPORTS[x.type].t+(x.v.studentName?' · '+x.v.studentName:'')+(x.n>1?' ('+x.n+')':''):x.type)))):null;
   mount(aHeader(),h('h2',{class:'sect'},'Report'),recent,
-    h('div',{class:'card'},h('label',{class:'small'},'Che report vuoi?',type),desc,...fields,go,err),out,aTabs('anag'),footer());
+    h('div',{class:'card'},h('label',{class:'small'},'Che report vuoi?',type),desc,...fields,go,err),out,aTabs('rep'),footer());
   if(pre)run(pre.v);
 }
 
