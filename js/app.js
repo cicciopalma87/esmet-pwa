@@ -804,7 +804,7 @@ ENGINES.cards=(ex,box,done)=>{
     if(i>=items.length)return done({score:items.length,total:items.length,wrong:[]});
     prog.textContent=(i+1)+' / '+items.length;
     body.replaceChildren(
-      ex.lab?h('p',{class:'sub'},ex.lab):null,
+      ...(ex.lab?[h('p',{class:'sub'},ex.lab)]:[]),
       h('div',{class:'fcard'},items[i].t),
       h('button',{class:'primary',onclick:()=>{i++;show()}},i+1<items.length?'Prossima':'Fine'));
   };
