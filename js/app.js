@@ -586,7 +586,7 @@ function absenceView(pre){
 function lessonView(c,l){
   const ex=(l.content&&l.content.exercises)||[];
   const res=LS.get('esmet_res_'+l.id,{});
-  const names={flash:'Flash cards',match:'Abbina',quiz:'Quiz',unjumble:'Riordina la frase',cloze:'Completa la frase',group:'Dividi in gruppi',cards:'Carte per parlare',type:'Scrivi la risposta'};
+  const names={flash:'Flash cards',match:'Abbina',quiz:'Quiz',unjumble:'Riordina la frase',cloze:'Completa la frase',group:'Dividi in gruppi',cards:'Carte per parlare',type:'Scrivi la risposta',map:'Mappa del parco'};
   const rows=ex.map((e,i)=>h('button',{class:'row-item',onclick:()=>exView(c,l,i)},
     h('span',{class:'ri-l'},h('span',null,h('span',{class:'kind'},names[e.type]||e.type,e.hw?h('span',{class:'tag'},'compiti'):null),h('br'),e.title)),
     h('span',{class:'ri-r'},h('span',{class:'res'},res[i]?res[i].score+'/'+res[i].total:''),ico('chev'))));
@@ -696,6 +696,46 @@ ENGINES.type=(ex,box,done)=>stepper(ex,box,done,(it,body,rec,next)=>{
   }},'Controlla');
   inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!inp.disabled)check.click()});
   body.append(h('p',{class:'prompt'},it.q),inp,check,fb);
+  inp.focus();
+});
+
+/* mappa del Parco Paradiso: si evidenzia un luogo e l'alunno scrive la risposta (Wo? = Dativ, Wohin? = Akkusativ) */
+const MAP_SPOTS={haltestelle:[60,28,130,56,'die Haltestelle','fermata'],eingang:[60,150,130,56,'der Eingang','ingresso'],parkplatz:[60,270,150,70,'der Parkplatz','parcheggio'],cafe:[262,76,120,56,'das Café','bar'],spielplatz:[420,262,170,64,'der Spielplatz','parco giochi']};
+const MAP_ON=new Set(['park','see',...Object.keys(MAP_SPOTS)]);
+function parkMap(on){
+  const NS='http://www.w3.org/2000/svg';
+  const s=document.createElementNS(NS,'svg');s.setAttribute('viewBox','0 0 640 380');s.setAttribute('class','pmap');s.setAttribute('role','img');s.setAttribute('aria-label','Mappa del Parco Paradiso');
+  const add=(tag,at,txt)=>{const n=document.createElementNS(NS,tag);Object.keys(at).forEach(k=>n.setAttribute(k,at[k]));if(txt)n.textContent=txt;s.append(n);return n};
+  add('rect',{x:0,y:0,width:640,height:380,class:'m-ground'});
+  add('rect',{x:0,y:0,width:44,height:380,class:'m-road'});
+  add('text',{x:22,y:190,class:'m-t',transform:'rotate(-90 22 190)','text-anchor':'middle'},'die Straße');
+  add('rect',{x:230,y:24,width:392,height:332,rx:18,class:'m-park'+(on==='park'?' on':'')});
+  add('text',{x:246,y:48,class:'m-t m-b'},'der Park');
+  Object.keys(MAP_SPOTS).forEach(k=>{const q=MAP_SPOTS[k];
+    add('rect',{x:q[0],y:q[1],width:q[2],height:q[3],rx:10,class:'m-spot'+(on===k?' on':'')});
+    add('text',{x:q[0]+q[2]/2,y:q[1]+q[3]/2-2,class:'m-t','text-anchor':'middle'},q[4]);
+    add('text',{x:q[0]+q[2]/2,y:q[1]+q[3]/2+18,class:'m-t m-s','text-anchor':'middle'},q[5])});
+  add('ellipse',{cx:500,cy:130,rx:84,ry:46,class:'m-lake'+(on==='see'?' on':'')});
+  add('text',{x:500,y:128,class:'m-t','text-anchor':'middle'},'der See');
+  add('text',{x:500,y:148,class:'m-t m-s','text-anchor':'middle'},'lago');
+  return s;
+}
+ENGINES.map=(ex,box,done)=>stepper(ex,box,done,(it,body,rec,next)=>{
+  const wo=it.m==='wo';
+  const inp=h('input',{class:'txt',type:'text',autocomplete:'off',autocapitalize:'off',spellcheck:'false','aria-label':'Risposta'});
+  const fb=h('p',{class:'fb',role:'status'});
+  const alts=String(it.a).split(/\s*\|\s*/);
+  const check=h('button',{class:'primary',onclick:()=>{
+    const v=norm(inp.value);if(!v)return;
+    const ok=alts.some(a=>norm(a)===v);
+    rec(ok,{q:it.q,given:inp.value,expected:alts[0]});
+    inp.disabled=true;check.remove();
+    fb.className='fb '+(ok?'good':'bad');fb.textContent=ok?'Giusto!':'Risposta corretta: '+alts[0];
+    if(!ok&&it.e)body.append(whyBox(it));
+    body.append(nextBtn(next));
+  }},'Controlla');
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!inp.disabled)check.click()});
+  body.append(parkMap(it.on),h('p',{class:'badge '+(wo?'b-dat':'b-akk')},wo?'Wo? · stato in luogo · Dativ':'Wohin? · movimento · Akkusativ'),h('p',{class:'prompt'},it.q),inp,check,fb);
   inp.focus();
 });
 
@@ -2089,8 +2129,8 @@ function jsLit(src,pos,env){
 }
 const LKIND={'Flash cards':'flash','Match up':'match','Matching pairs':'match','Find the match':'match','Quiz':'quiz','Unjumble':'unjumble','Complete the sentence':'cloze','Group sort':'group','Spin the wheel':'cards','Open the box':'cards','Speaking cards':'cards'};
 const LALIAS={'flash':'Flash cards','abbina':'Match up','quiz':'Quiz','riordina':'Unjumble','completa':'Complete the sentence','gruppi':'Group sort','carte':'Speaking cards'};
-const LNAME={type:'Scrivi la risposta',flash:'Flash cards',match:'Abbina',quiz:'Quiz',unjumble:'Riordina la frase',cloze:'Completa la frase',group:'Dividi in gruppi',cards:'Carte per parlare'};
-const KMAP={quiz:'quiz',match:'match',unjumble:'unjumble',type:'type',group:'group',cards:'cards',flash:'flash',cloze:'cloze'};
+const LNAME={map:'Mappa',type:'Scrivi la risposta',flash:'Flash cards',match:'Abbina',quiz:'Quiz',unjumble:'Riordina la frase',cloze:'Completa la frase',group:'Dividi in gruppi',cards:'Carte per parlare'};
+const KMAP={mappa:'map',quiz:'quiz',match:'match',unjumble:'unjumble',type:'type',group:'group',cards:'cards',flash:'flash',cloze:'cloze'};
 const MATCH_T=['Match up','Matching pairs','Find the match'];
 const WW_INSTR=/wordwall|double sided|crea (tre|due|quattro) gruppi|domanda, risposta corretta|per ogni riga|parentesi quadre|a due a due come un memory|editor/i;
 function lineOf(text,pos){let n=1;for(let k=0;k<pos&&k<text.length;k++)if(text.charCodeAt(k)===10)n++;return n}
@@ -2207,6 +2247,12 @@ function mapLesson(l){
       }else if(type==='flash'){
         if(!r[0]||!r[1])return P(n,'servono due celle: fronte e retro.');
         items.push({id,f:r[0],b:r[1]});
+      }else if(type==='map'){
+        if(r.length<4||!r[2]||!r[3])return P(n,'servono luogo, wo/wohin, domanda e risposta.');
+        if(!MAP_ON.has(r[0]))P(n,'il luogo «'+r[0]+'» non è sulla mappa (ammessi: '+[...MAP_ON].join(', ')+').');
+        if(r[1]!=='wo'&&r[1]!=='wohin')P(n,'la seconda cella deve essere «wo» o «wohin».');
+        items.push({id,on:r[0],m:r[1],q:r[2],a:r[3],e:r[4]||''});
+        if(!items[items.length-1].e)delete items[items.length-1].e;
       }else if(type==='type'){
         if(!r[0]||!r[1])return P(n,'servono la frase con ___ e la risposta.');
         if(!r[0].includes('___'))P(n,'nella frase manca il segno ___ dove va scritta la risposta.');
@@ -2320,7 +2366,7 @@ function lessonTextFix(c,all,l,onSaved){
     inp.value=val;fields.push({obj,key,idx,inp,orig:val,label});
     return h('label',{class:'small'},label,inp);
   };
-  const SK=new Set(['id','type','hw','extra','ord','g']);
+  const SK=new Set(['id','type','hw','extra','ord','g','on','m']);
   const blocks=(content.exercises||[]).map((ex,i)=>{
     const kids=[h('strong',null,'Esercizio '+(i+1)),mk(ex,'title',null,'Titolo esercizio')];
     if(typeof ex.instr==='string')kids.push(mk(ex,'instr',null,'Istruzioni',true));

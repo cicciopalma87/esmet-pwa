@@ -204,3 +204,13 @@ label.chk{flex-direction:row;color:var(--ink)}
 .rep-tbl{border-collapse:collapse;font-size:13px;min-width:100%}
 .rep-tbl th,.rep-tbl td{padding:6px 10px;border-bottom:1px solid #eee;text-align:left;white-space:nowrap}
 .rep-tbl th{position:sticky;top:0;background:#f5f1e8;z-index:1}
+.pmap{width:100%;height:auto;border:1px solid var(--line,#ddd);border-radius:10px;display:block}
+.pmap .m-ground{fill:#e3f1da}.pmap .m-road{fill:#b5bcc6}
+.pmap .m-park{fill:none;stroke:#6f8a63;stroke-width:2;stroke-dasharray:7 5}
+.pmap .m-spot,.pmap .m-lake{fill:#fff;stroke:#6f8a63;stroke-width:2}.pmap .m-lake{fill:#cfe6fb}
+.pmap .on{fill:#ffe08a;stroke:#b8352a;stroke-width:4;stroke-dasharray:none}
+.pmap .m-park.on{fill:#ffe08a;fill-opacity:.35}
+.pmap .m-t{fill:#15233a;font:600 16px system-ui,sans-serif}.pmap .m-b{font-weight:700;font-size:18px}
+.pmap .m-s{font-weight:400;font-size:12.5px;fill:#566782}
+.badge{align-self:flex-start;font-weight:600;font-size:.92rem;border-radius:999px;padding:3px 12px;border:1px solid;display:inline-block}
+.b-akk{color:#1d5fae;background:#e1eefc;border-color:#1d5fae}.b-dat{color:#b3261e;background:#fbe6e4;border-color:#b3261e}
