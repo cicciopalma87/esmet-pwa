@@ -2089,7 +2089,8 @@ function jsLit(src,pos,env){
 }
 const LKIND={'Flash cards':'flash','Match up':'match','Matching pairs':'match','Find the match':'match','Quiz':'quiz','Unjumble':'unjumble','Complete the sentence':'cloze','Group sort':'group','Spin the wheel':'cards','Open the box':'cards','Speaking cards':'cards'};
 const LALIAS={'flash':'Flash cards','abbina':'Match up','quiz':'Quiz','riordina':'Unjumble','completa':'Complete the sentence','gruppi':'Group sort','carte':'Speaking cards'};
-const LNAME={flash:'Flash cards',match:'Abbina',quiz:'Quiz',unjumble:'Riordina la frase',cloze:'Completa la frase',group:'Dividi in gruppi',cards:'Carte per parlare'};
+const LNAME={type:'Scrivi la risposta',flash:'Flash cards',match:'Abbina',quiz:'Quiz',unjumble:'Riordina la frase',cloze:'Completa la frase',group:'Dividi in gruppi',cards:'Carte per parlare'};
+const KMAP={quiz:'quiz',match:'match',unjumble:'unjumble',type:'type',group:'group',cards:'cards',flash:'flash',cloze:'cloze'};
 const MATCH_T=['Match up','Matching pairs','Find the match'];
 const WW_INSTR=/wordwall|double sided|crea (tre|due|quattro) gruppi|domanda, risposta corretta|per ogni riga|parentesi quadre|a due a due come un memory|editor/i;
 function lineOf(text,pos){let n=1;for(let k=0;k<pos&&k<text.length;k++)if(text.charCodeAt(k)===10)n++;return n}
@@ -2159,14 +2160,17 @@ function mapLesson(l){
   if(!Array.isArray(l.ex)||!l.ex.length)probs.push('Lezione '+l.n+': non ha esercizi.');
   (l.ex||[]).forEach((x,i)=>{
     const P=(row,msg)=>probs.push('Lezione '+l.n+' · esercizio '+(i+1)+(x&&x.h?' «'+x.h+'»':'')+(row?', riga '+row:'')+': '+msg);
-    const type=LKIND[x.t];
-    if(!type)return P(0,'il tipo «'+x.t+'» non è riconosciuto (tipi ammessi: '+Object.keys(LKIND).join(', ')+').');
+    /* due formati di file: «t» = tipo Wordwall (Francesca), «k» = tipo delle pagine di esercizi autonome (con spiegazioni «e») */
+    const dk=x&&x.t===undefined&&x.k!==undefined;
+    const type=dk?KMAP[x.k]:LKIND[x.t];
+    if(!type)return P(0,'il tipo «'+(dk?x.k:x.t)+'» non è riconosciuto'+(dk?' (tipi ammessi: '+Object.keys(KMAP).join(', ')+').':' (tipi ammessi: '+Object.keys(LKIND).join(', ')+').'));
     if(!x.h||!String(x.h).trim())P(0,'manca il titolo.');
     if(!Array.isArray(x.r)||!x.r.length)return P(0,'non ci sono righe.');
     const o={id:'e'+(i+1),type,title:String(x.h||'').trim(),instr:(x.s&&!WW_INSTR.test(x.s))?String(x.s).trim():''};
     if(x.hw)o.hw=true;
-    const items=[],groups=[];
+    const items=[],groups=[];const expl=(x.e&&typeof x.e==='object'&&!Array.isArray(x.e))?x.e:null;
     x.r.forEach((row,k)=>{
+      const n0=items.length;
       const n=k+1;
       if(!Array.isArray(row))return P(n,'la riga non è un elenco di celle.');
       const r=row.map(c=>String(c==null?'':c).trim());
@@ -2191,7 +2195,7 @@ function mapLesson(l){
       }else if(type==='unjumble'){
         if(!r[0])return P(n,'manca la frase.');
         if(r[0].split(/\s+/).length<2)P(n,'la frase ha una sola parola.');
-        items.push({id,s:[r[0]]});
+        items.push({id,s:dk?r.filter(Boolean):[r[0]]});
       }else if(type==='cards'){
         if(!r[0])return P(n,'manca il testo della carta.');
         items.push({id,t:r[0]});
@@ -2203,7 +2207,12 @@ function mapLesson(l){
       }else if(type==='flash'){
         if(!r[0]||!r[1])return P(n,'servono due celle: fronte e retro.');
         items.push({id,f:r[0],b:r[1]});
+      }else if(type==='type'){
+        if(!r[0]||!r[1])return P(n,'servono la frase con ___ e la risposta.');
+        if(!r[0].includes('___'))P(n,'nella frase manca il segno ___ dove va scritta la risposta.');
+        items.push({id,q:r[0],a:r[1]});
       }
+      if(expl&&type!=='group'&&items.length>n0&&expl[row[0]]!=null&&String(expl[row[0]]).trim())items[items.length-1].e=String(expl[row[0]]).trim();
     });
     if(type==='match'&&items.length<2)P(0,'servono almeno due coppie.');
     if(type==='group'&&groups.length<2)P(0,'servono almeno due gruppi.');
@@ -2302,7 +2311,7 @@ function lessonTextFix(c,all,l,onSaved){
   const back=()=>teacherLessons(c,all);
   const ret=()=>onSaved?onSaved(content):back();
   const content=JSON.parse(JSON.stringify(l.content||{exercises:[]}));
-  const LAB={title:'Titolo',instr:'Istruzioni',lab:'Etichetta',t:'Testo',l:'Sinistra',r:'Destra',q:'Domanda',a:'Risposta corretta',w:'Risposta sbagliata',pre:'Prima',ans:'Parola',post:'Dopo',s:'Frase',f:'Fronte',b:'Retro',cols:'Colonna',groups:'Gruppo'};
+  const LAB={title:'Titolo',instr:'Istruzioni',lab:'Etichetta',t:'Testo',l:'Sinistra',r:'Destra',q:'Domanda',a:'Risposta corretta',w:'Risposta sbagliata',pre:'Prima',ans:'Parola',post:'Dopo',s:'Frase',f:'Fronte',b:'Retro',cols:'Colonna',groups:'Gruppo',e:'Spiegazione'};
   const KEEP=new Set(['pre','post']);
   const fields=[];
   const mk=(obj,key,idx,label,long)=>{
